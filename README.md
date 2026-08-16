@@ -1,4 +1,4 @@
-# WipeX 🛡️
+# Aegis Wipe 🛡️
 
 **Zero-Trust Data Sanitization & Hardware-Bound Verification Platform**
 
