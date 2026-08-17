@@ -468,6 +468,268 @@ body {
   color: var(--red-text);
 }
 
+/* Scan Button */
+.btn-scan {
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+/* Drive Status Panel */
+.drive-status-panel {
+  margin-top: 22px;
+  margin-bottom: 8px;
+  background: var(--bg-surface-subtle);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.drive-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.drive-status-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.clean-status-badge {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid;
+}
+.clean-status-badge.status-clean {
+  background: var(--emerald-bg);
+  color: var(--emerald-text);
+  border-color: var(--emerald-border);
+}
+.clean-status-badge.status-data {
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  border-color: var(--amber-border);
+}
+
+/* Capacity Section */
+.capacity-section {
+  margin-bottom: 20px;
+}
+.capacity-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.capacity-values {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.capacity-bar-track {
+  height: 14px;
+  background: #ffffff;
+  border: 1px solid var(--border-medium);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.capacity-bar-used {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue-500), var(--blue-600));
+  transition: width 0.4s ease;
+}
+
+/* Drive Status Grid */
+.drive-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+@media (max-width: 800px) {
+  .drive-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.status-col {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.status-col-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.count-badge {
+  margin-left: auto;
+  background: var(--blue-bg);
+  color: var(--blue-text);
+  border: 1px solid var(--blue-border);
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-family: var(--font-mono);
+}
+.count-badge.badge-amber {
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  border-color: var(--amber-border);
+}
+
+.file-list {
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-y: auto;
+  max-height: 190px;
+  padding-right: 2px;
+}
+.file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px dotted var(--border-subtle);
+  gap: 6px;
+}
+.file-list li:last-child {
+  border-bottom: none;
+}
+.file-list li.empty-list {
+  justify-content: center;
+  padding: 18px 0;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 11px;
+}
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.file-size {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.rec-chance {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-right: 2px;
+}
+.rec-chance.high { background: var(--red-bg); color: var(--red-text); }
+.rec-chance.medium { background: var(--amber-bg); color: var(--amber-text); }
+
+/* Summary Box */
+.summary-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-surface-subtle);
+  border-radius: var(--radius-sm);
+}
+.summary-row .sr-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.summary-row .sr-value {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.summary-row.warning { border-left: 3px solid var(--amber-600); }
+.summary-row.danger  { border-left: 3px solid var(--red-600); }
+.summary-row.success { border-left: 3px solid var(--emerald-600); }
+
+.summary-action-box {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 11px;
+}
+.summary-action-box.safe {
+  background: var(--emerald-bg);
+  color: var(--emerald-text);
+  border: 1px solid var(--emerald-border);
+}
+.summary-action-box.warn {
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  border: 1px solid var(--amber-border);
+}
+
+/* Step blocker UI for stepper */
+.step-item.locked {
+  opacity: 0.55;
+  cursor: not-allowed !important;
+}
+.step-item.locked:hover {
+  background: transparent;
+}
+
+.step-blocked-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--red-600);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(220,38,38,0.3);
+  z-index: 1000;
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+.step-blocked-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ==========================================================================
    STEP 2: STORAGE UNLOCK
    ========================================================================== */

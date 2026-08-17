@@ -59,8 +59,16 @@
         <!-- STEP 1: SELECT DRIVE -->
         <div id="phase-1-panel" class="phase-screen active">
           <div class="phase-header-block">
-            <h2 class="phase-title">1. Select the Drive to Wipe</h2>
-            <p class="phase-desc">Choose a connected hard drive or SSD to begin.</p>
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+              <div>
+                <h2 class="phase-title">1. Select the Drive to Wipe</h2>
+                <p class="phase-desc">Choose a connected hard drive or SSD to begin.</p>
+              </div>
+              <button class="btn btn-secondary btn-scan" id="btn-scan-drives" onclick="app.loadDevices()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+                <span>Scan Drives</span>
+              </button>
+            </div>
           </div>
 
           <div class="device-card-list" id="device-card-list">
@@ -71,8 +79,65 @@
             <!-- Dynamic simple status -->
           </div>
 
+          <!-- Drive Status Panel (appears when a drive is selected) -->
+          <div class="drive-status-panel" id="drive-status-panel" style="display:none;">
+            <div class="drive-status-header">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                <h3 class="drive-status-title">Drive Status & Content Overview</h3>
+              </div>
+              <div class="clean-status-badge" id="clean-status-badge"></div>
+            </div>
+
+            <!-- Capacity Usage Bar -->
+            <div class="capacity-section">
+              <div class="capacity-labels">
+                <span><strong>Capacity Used</strong></span>
+                <span class="capacity-values" id="capacity-values-label">—</span>
+              </div>
+              <div class="capacity-bar-track">
+                <div class="capacity-bar-used" id="capacity-bar-used" style="width:0%;"></div>
+              </div>
+            </div>
+
+            <!-- Three content columns -->
+            <div class="drive-status-grid">
+              <div class="status-col current-files-col">
+                <div class="status-col-header">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <span>Files Currently on Drive</span>
+                  <span class="count-badge" id="current-files-count">0</span>
+                </div>
+                <ul class="file-list" id="current-files-list">
+                  <li class="empty-list">No data</li>
+                </ul>
+              </div>
+
+              <div class="status-col recoverable-col">
+                <div class="status-col-header">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  <span>Deleted (But Recoverable)</span>
+                  <span class="count-badge badge-amber" id="recoverable-count">0</span>
+                </div>
+                <ul class="file-list" id="recoverable-files-list">
+                  <li class="empty-list">No recoverable items</li>
+                </ul>
+              </div>
+
+              <div class="status-col summary-col">
+                <div class="status-col-header">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                  <span>Assessment Summary</span>
+                </div>
+                <div class="summary-box" id="summary-box">
+                  <!-- Populated dynamically -->
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="action-footer">
-            <button class="btn btn-primary" onclick="app.goToPhase(2)">
+            <button class="btn btn-primary" id="btn-go-phase-2" onclick="app.goToPhase(2)" disabled>
               <span>Continue</span>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
@@ -382,5 +447,8 @@
   <script src="js/utils/entropy.js"></script>
   <script src="js/utils/qrGenerator.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- Step-blocked toast -->
+  <div class="step-blocked-toast" id="step-blocked-toast"></div>
 </body>
 </html>

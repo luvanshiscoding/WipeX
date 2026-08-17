@@ -21,11 +21,24 @@ class WipeXApp {
     this.isWiping = false;
     this.wipeProgress = 0;
     this.wipeInterval = null;
+    this.wipeCompleted = false;
+
+    this.verificationCompleted = false;
 
     this.sectorStates = new Array(256).fill(0);
     this.currentNonce = (window.AegisCrypto || window.WipeXCrypto).generateNonce();
     this.currentCertId = null;
     this.currentCertData = null;
+
+    this.phaseCompleted = {
+      1: false,
+      2: false,
+      3: false,
+      4: false,
+      5: false,
+      6: false,
+      7: false
+    };
 
     this.simpleMethods = [
       {
@@ -74,8 +87,14 @@ class WipeXApp {
 
   async loadDevices() {
     const listEl = document.getElementById('device-card-list');
+    const scanBtn = document.getElementById('btn-scan-drives');
 
-    // Show loading state
+    if (scanBtn) {
+      scanBtn.disabled = true;
+      const original = scanBtn.querySelector('span')?.textContent || 'Scan Drives';
+      scanBtn.querySelector('span').textContent = 'Scanning…';
+    }
+
     if (listEl) {
       listEl.innerHTML = `
         <div style="text-align:center; padding:40px; color:var(--text-muted);">
@@ -86,31 +105,75 @@ class WipeXApp {
       `;
     }
 
+    let devices = [];
+    let backendError = false;
+
     try {
-      const res = await fetch(`${this.apiBaseUrl}/api/devices`);
+      const res = await fetch(`${this.apiBaseUrl}/api/devices`, { cache: 'no-store' });
       if (!res.ok) throw new Error('API error');
-      const devices = await res.json();
-      this.devices = devices;
-      this.selectedDevice = devices[0] || null;
-      if (this.selectedDevice) {
-        this.selectedMethodId = this.selectedDevice.recommendedMethod || 'purge-nvme-crypto';
-      }
-      this.renderDeviceList();
-      this.renderStorageBar();
-      this.renderMethodOptions();
+      devices = await res.json();
     } catch (e) {
-      if (listEl) {
-        listEl.innerHTML = `
-          <div style="text-align:center; padding:40px; border:1.5px solid var(--red-border); background:var(--red-bg); border-radius:var(--radius-md); color:var(--red-text);">
-            <div style="font-size:28px; margin-bottom:12px;">⚠️</div>
-            <div style="font-size:15px; font-weight:700; margin-bottom:6px;">Backend Service Required</div>
-            <div style="font-size:13px; color:var(--text-secondary); margin-bottom:14px;">Start the WipeX backend service to scan connected drives:</div>
-            <code style="display:block; background:#fff; border:1px solid var(--border-subtle); border-radius:6px; padding:10px 14px; font-size:13px; font-family:var(--font-mono); color:var(--text-primary);">python3 main.py</code>
-            <button class="btn btn-primary" style="margin-top:16px;" onclick="app.loadDevices()">Retry Scan</button>
-          </div>
-        `;
-      }
+      backendError = true;
+      devices = (window.MOCK_DEVICES || []).map(d => ({ ...d }));
     }
+
+    const seenPaths = new Set();
+    const seenSerials = new Set();
+    const deduped = [];
+    for (const dev of devices) {
+      const path = dev.devicePath || '';
+      const serial = dev.serialNumber || '';
+      const idKey = dev.id || '';
+      if (path && seenPaths.has(path)) continue;
+      if (serial && seenSerials.has(serial)) continue;
+      if (!path && !serial && idKey && seenPaths.has(idKey)) continue;
+      if (path) seenPaths.add(path);
+      else if (idKey) seenPaths.add(idKey);
+      if (serial) seenSerials.add(serial);
+      if (typeof dev.capacityUsedPct === 'undefined') {
+        dev.capacityUsedBytes = 0;
+        dev.capacityUsedPct = 0;
+        dev.isAlreadyClean = false;
+        dev.currentFiles = [];
+        dev.deletedRecoverableFiles = [];
+      }
+      deduped.push(dev);
+    }
+
+    this.devices = deduped;
+
+    let alertHtml = '';
+    if (backendError && this.devices.length) {
+      alertHtml = `
+        <div data-backend-banner style="text-align:center; padding: 10px 0; margin-bottom: 10px; font-size:12px; color:var(--text-muted);">
+          ⚠️ Backend offline. Using demo device presets.
+        </div>
+      `;
+    }
+
+    this.selectedDevice = this.devices[0] || null;
+    if (this.selectedDevice) {
+      this.selectedMethodId = this.selectedDevice.recommendedMethod || 'purge-nvme-crypto';
+      this.phaseCompleted[1] = true;
+    } else {
+      this.phaseCompleted[1] = false;
+    }
+
+    if (scanBtn) {
+      scanBtn.disabled = false;
+      const span = scanBtn.querySelector('span');
+      if (span) span.textContent = 'Scan Drives';
+    }
+
+    if (listEl) {
+      listEl.innerHTML = alertHtml;
+    }
+    this.renderDeviceList();
+    this.renderDriveStatus();
+    this.updatePhase1ContinueBtn();
+    this.renderStorageBar();
+    this.renderMethodOptions();
+    this.renderStepper();
   }
 
   switchView(viewName) {
@@ -128,6 +191,138 @@ class WipeXApp {
     }
   }
 
+  formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const k = 1000;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  showStepBlockedToast(message) {
+    const toast = document.getElementById('step-blocked-toast');
+    if (!toast) return;
+    toast.textContent = '⚠️ ' + message;
+    toast.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  isPhaseAccessible(phaseNum) {
+    if (phaseNum <= this.currentPhase) return { ok: true };
+    if (phaseNum > 7 || phaseNum < 1) return { ok: false, reason: 'Invalid step' };
+    if (!this.phaseCompleted[1]) return { ok: false, reason: 'Step 1 required: Select a drive first' };
+    if (phaseNum >= 3 && !this.phaseCompleted[2]) return { ok: false, reason: 'Step 2 required: Unlock & prepare the drive first' };
+    if (phaseNum >= 4 && !this.phaseCompleted[3]) return { ok: false, reason: 'Step 3 required: Choose a sanitization method first' };
+    if (phaseNum >= 5 && !this.phaseCompleted[4]) return { ok: false, reason: 'Step 4 required: Complete the wipe before verifying' };
+    if (phaseNum >= 6 && !this.phaseCompleted[5]) return { ok: false, reason: 'Step 5 required: Complete verification first' };
+    if (phaseNum >= 7 && !this.phaseCompleted[6]) return { ok: false, reason: 'Step 6 required: View safety score before certificate' };
+    return { ok: true };
+  }
+
+  updatePhase1ContinueBtn() {
+    const btn = document.getElementById('btn-go-phase-2');
+    if (btn) {
+      btn.disabled = !this.selectedDevice;
+    }
+    this.phaseCompleted[1] = !!this.selectedDevice;
+  }
+
+  renderDriveStatus() {
+    const panel = document.getElementById('drive-status-panel');
+    if (!panel) return;
+    const dev = this.selectedDevice;
+    if (!dev) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'block';
+
+    const cleanBadge = document.getElementById('clean-status-badge');
+    const capLabel = document.getElementById('capacity-values-label');
+    const capBar = document.getElementById('capacity-bar-used');
+    const curCount = document.getElementById('current-files-count');
+    const curList = document.getElementById('current-files-list');
+    const recCount = document.getElementById('recoverable-count');
+    const recList = document.getElementById('recoverable-files-list');
+    const summaryBox = document.getElementById('summary-box');
+
+    const pct = typeof dev.capacityUsedPct === 'number' ? dev.capacityUsedPct : 0;
+    const usedBytes = dev.capacityUsedBytes || 0;
+    const totalBytes = dev.capacityBytes || 0;
+    const isClean = !!dev.isAlreadyClean;
+    const currentFiles = Array.isArray(dev.currentFiles) ? dev.currentFiles : [];
+    const recoverableFiles = Array.isArray(dev.deletedRecoverableFiles) ? dev.deletedRecoverableFiles : [];
+
+    if (cleanBadge) {
+      cleanBadge.textContent = isClean ? '✓ DRIVE IS ALREADY CLEAN' : '⚠ CONTAINS DATA — WIPE REQUIRED';
+      cleanBadge.className = 'clean-status-badge ' + (isClean ? 'status-clean' : 'status-data');
+    }
+    if (capLabel) {
+      capLabel.textContent = `${this.formatBytes(usedBytes)} / ${this.formatBytes(totalBytes)} (${pct.toFixed(1)}%)`;
+    }
+    if (capBar) {
+      capBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      if (isClean) capBar.style.background = 'linear-gradient(90deg,#10b981,#059669)';
+      else capBar.style.background = 'linear-gradient(90deg,#3b82f6,#2563eb)';
+    }
+
+    if (curCount) curCount.textContent = currentFiles.length;
+    if (curList) {
+      if (!currentFiles.length) {
+        curList.innerHTML = `<li class="empty-list">✓ No active files — drive is empty</li>`;
+      } else {
+        curList.innerHTML = currentFiles.map(f =>
+          `<li><span class="file-name" title="${f.name}">${f.name}</span><span class="file-size">${f.size}</span></li>`
+        ).join('');
+      }
+    }
+
+    if (recCount) recCount.textContent = recoverableFiles.length;
+    if (recList) {
+      if (!recoverableFiles.length) {
+        recList.innerHTML = `<li class="empty-list">✓ Nothing recoverable remaining</li>`;
+      } else {
+        recList.innerHTML = recoverableFiles.map(f => {
+          const cls = (f.recoverability || 'medium').toLowerCase().includes('high') ? 'high' : 'medium';
+          return `<li>
+            <span class="file-name" title="${f.name}">${f.name}</span>
+            <span style="display:flex;align-items:center;gap:4px;">
+              <span class="rec-chance ${cls}">${f.recoverability}</span>
+              <span class="file-size">${f.size}</span>
+            </span>
+          </li>`;
+        }).join('');
+      }
+    }
+
+    if (summaryBox) {
+      const rows = [];
+      if (isClean) {
+        rows.push(`<div class="summary-row success"><span class="sr-label">Pre-Wipe Status</span><span class="sr-value text-emerald">ALREADY CLEAN</span></div>`);
+      } else {
+        rows.push(`<div class="summary-row ${pct > 80 ? 'warning' : ''}"><span class="sr-label">Data on Drive</span><span class="sr-value">${pct.toFixed(1)}%</span></div>`);
+      }
+      rows.push(`<div class="summary-row"><span class="sr-label">Active Files</span><span class="sr-value">${currentFiles.length}</span></div>`);
+      const recRiskClass = recoverableFiles.length === 0 ? 'success' : (recoverableFiles.filter(f => (f.recoverability || '').toLowerCase().includes('high')).length > 0 ? 'danger' : 'warning');
+      rows.push(`<div class="summary-row ${recRiskClass}"><span class="sr-label">Recoverable Traces</span><span class="sr-value">${recoverableFiles.length}</span></div>`);
+      const bootRowClass = dev.isBootDrive ? 'danger' : 'success';
+      rows.push(`<div class="summary-row ${bootRowClass}"><span class="sr-label">OS Boot Drive</span><span class="sr-value ${dev.isBootDrive ? 'text-red' : 'text-emerald'}">${dev.isBootDrive ? 'YES' : 'NO'}</span></div>`);
+
+      let actionBox = '';
+      if (dev.expectedOutcome === 'RED') {
+        actionBox = `<div class="summary-action-box warn">🚨 Hardware is failing — this drive REQUIRES physical shredding after wipe.</div>`;
+      } else if (isClean) {
+        actionBox = `<div class="summary-action-box safe">✓ Drive already reads as empty. Continuing still recommended for formal certification.</div>`;
+      } else if (recoverableFiles.length > 0) {
+        actionBox = `<div class="summary-action-box warn">⚠ Wipe will overwrite active files AND purge ${recoverableFiles.length} recoverable deleted item(s).</div>`;
+      } else {
+        actionBox = `<div class="summary-action-box safe">✓ Ready for sanitization. Wipe will overwrite ${currentFiles.length} active file(s).</div>`;
+      }
+      summaryBox.innerHTML = rows.join('') + actionBox;
+    }
+  }
+
   renderStepper() {
     const stepperEl = document.getElementById('phase-stepper');
     if (!stepperEl) return;
@@ -142,16 +337,33 @@ class WipeXApp {
       { num: 7, title: "7. Certificate" }
     ];
 
-    stepperEl.innerHTML = phases.map(p => `
-      <div class="step-item ${p.num === this.currentPhase ? 'active' : ''} ${p.num < this.currentPhase ? 'completed' : ''}" onclick="app.goToPhase(${p.num})">
-        <div class="step-num-circle">${p.num < this.currentPhase ? '✓' : p.num}</div>
-        <span class="step-title">${p.title}</span>
-      </div>
-    `).join('');
+    stepperEl.innerHTML = phases.map(p => {
+      const accessibility = this.isPhaseAccessible(p.num);
+      const locked = !accessibility.ok && p.num > this.currentPhase;
+      const isCurrent = p.num === this.currentPhase;
+      const isCompleted = this.phaseCompleted[p.num] && p.num < this.currentPhase;
+      return `
+        <div class="step-item ${isCurrent ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${locked ? 'locked' : ''}"
+             onclick="app._stepperClick(${p.num})" title="${locked ? accessibility.reason : ''}">
+          <div class="step-num-circle">${isCompleted && !isCurrent ? '✓' : p.num}</div>
+          <span class="step-title">${p.title}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  _stepperClick(phaseNum) {
+    this.goToPhase(phaseNum);
   }
 
   goToPhase(phaseNum) {
     if (phaseNum < 1 || phaseNum > 7) return;
+
+    const access = this.isPhaseAccessible(phaseNum);
+    if (!access.ok && phaseNum > this.currentPhase) {
+      this.showStepBlockedToast(access.reason);
+      return;
+    }
 
     if (this.currentPhase === 4 && phaseNum !== 4 && this.wipeInterval) {
       clearInterval(this.wipeInterval);
@@ -166,12 +378,12 @@ class WipeXApp {
 
     this.renderStepper();
 
-    if (phaseNum === 1) this.renderDeviceList();
+    if (phaseNum === 1) { this.renderDeviceList(); this.renderDriveStatus(); }
     else if (phaseNum === 2) this.renderStorageBar();
     else if (phaseNum === 3) this.renderMethodOptions();
     else if (phaseNum === 4) this.resetWipeCanvas();
-    else if (phaseNum === 5) this.renderVerification();
-    else if (phaseNum === 6) this.renderTrustScore();
+    else if (phaseNum === 5) { this.renderVerification(); this.phaseCompleted[5] = true; }
+    else if (phaseNum === 6) { this.renderTrustScore(); this.phaseCompleted[6] = true; }
     else if (phaseNum === 7) this.renderCertificate();
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -181,9 +393,25 @@ class WipeXApp {
   renderDeviceList() {
     const listEl = document.getElementById('device-card-list');
     const alertEl = document.getElementById('step-1-alert');
-    if (!listEl || !this.devices.length) return;
+    if (!listEl) return;
+    if (!this.devices.length) {
+      listEl.innerHTML = `
+        <div style="text-align:center; padding:40px; border:1.5px solid var(--red-border); background:var(--red-bg); border-radius:var(--radius-md); color:var(--red-text); margin-top:10px;">
+          <div style="font-size:28px; margin-bottom:12px;">⚠️</div>
+          <div style="font-size:15px; font-weight:700; margin-bottom:6px;">No drives detected</div>
+          <div style="font-size:13px; color:var(--text-secondary); margin-bottom:14px;">Connect a storage drive and click "Scan Drives" to detect it.</div>
+          <code style="display:block; background:#fff; border:1px solid var(--border-subtle); border-radius:6px; padding:10px 14px; font-size:13px; font-family:var(--font-mono); color:var(--text-primary);">python3 main.py</code>
+          <button class="btn btn-primary" style="margin-top:16px;" onclick="app.loadDevices()">Scan Drives</button>
+        </div>
+      `;
+      if (alertEl) alertEl.style.display = 'none';
+      return;
+    }
 
-    listEl.innerHTML = this.devices.map(dev => {
+    const existingBanner = listEl.querySelector('[data-backend-banner]');
+    const bannerHtml = existingBanner ? existingBanner.outerHTML : '';
+
+    const devicesHtml = this.devices.map(dev => {
       const isSelected = this.selectedDevice && dev.id === this.selectedDevice.id;
       let healthBadge = `<span class="card-health-pill pill-green">Good Condition</span>`;
       if (dev.expectedOutcome === 'YELLOW') {
@@ -192,7 +420,10 @@ class WipeXApp {
         healthBadge = `<span class="card-health-pill pill-red">Damaged</span>`;
       }
 
-      // Show boot drive warning
+      const cleanTag = dev.isAlreadyClean
+        ? `<span class="card-health-pill pill-green" style="margin-left:auto;">Already Clean</span>`
+        : '';
+
       const bootWarning = dev.isBootDrive
         ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">⚠️ OS Boot Drive — wipe will format the operating system</div>`
         : '';
@@ -201,7 +432,10 @@ class WipeXApp {
         <div class="device-card ${isSelected ? 'selected' : ''}" onclick="app.selectDevice('${dev.id}')">
           <div class="card-top">
             <span class="card-device-type">${dev.type}</span>
-            ${healthBadge}
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${cleanTag}
+              ${healthBadge}
+            </div>
           </div>
           <div class="card-model-name">${dev.model}</div>
           <div class="card-meta-row">
@@ -217,9 +451,15 @@ class WipeXApp {
       `;
     }).join('');
 
+    listEl.innerHTML = bannerHtml + devicesHtml;
+
     if (alertEl && this.selectedDevice) {
+      alertEl.style.display = '';
       const dev = this.selectedDevice;
-      if (dev.expectedOutcome === 'GREEN') {
+      if (dev.isAlreadyClean) {
+        alertEl.className = 'simple-alert-box alert-green';
+        alertEl.innerHTML = `✓ <strong>${dev.model}</strong> appears already wiped — verify and continue for formal certification.`;
+      } else if (dev.expectedOutcome === 'GREEN') {
         alertEl.className = 'simple-alert-box alert-green';
         alertEl.innerHTML = `✓ <strong>${dev.model}</strong> is healthy and ready for secure wipe.`;
       } else if (dev.expectedOutcome === 'YELLOW') {
@@ -229,6 +469,8 @@ class WipeXApp {
         alertEl.className = 'simple-alert-box alert-red';
         alertEl.innerHTML = `🚨 <strong>${dev.model}</strong> has ${dev.reallocatedSectors > 0 ? dev.reallocatedSectors + ' bad sectors' : 'critical hardware faults'}. Physical shredding will be required.`;
       }
+    } else if (alertEl) {
+      alertEl.style.display = 'none';
     }
   }
 
@@ -238,8 +480,16 @@ class WipeXApp {
 
     this.selectedDevice = found;
     this.unfrozen = false;
+    this.phaseCompleted[2] = false;
+    this.phaseCompleted[3] = false;
+    this.phaseCompleted[4] = false;
+    this.phaseCompleted[5] = false;
+    this.phaseCompleted[6] = false;
     this.selectedMethodId = found.recommendedMethod || 'purge-nvme-crypto';
     this.renderDeviceList();
+    this.renderDriveStatus();
+    this.updatePhase1ContinueBtn();
+    this.renderStepper();
   }
 
   /* STEP 2: STORAGE UNLOCK */
@@ -291,6 +541,7 @@ class WipeXApp {
     }
 
     if (proceedBtn) proceedBtn.disabled = !this.unfrozen;
+    this.phaseCompleted[2] = !!this.unfrozen;
   }
 
   async executeUnfreeze() {
@@ -298,7 +549,9 @@ class WipeXApp {
       await fetch(`${this.apiBaseUrl}/api/storage/unfreeze/${this.selectedDevice.id}`, { method: 'POST' });
     } catch (e) { /* backend may not be needed for macOS — proceed anyway */ }
     this.unfrozen = true;
+    this.phaseCompleted[2] = true;
     this.renderStorageBar();
+    this.renderStepper();
   }
 
   /* STEP 3: SANITIZATION METHODS */
@@ -334,11 +587,15 @@ class WipeXApp {
         </div>
       `;
     }).join('');
+
+    this.phaseCompleted[3] = !!this.selectedMethodId;
   }
 
   selectSimpleMethod(methodId) {
     this.selectedMethodId = methodId;
+    this.phaseCompleted[3] = true;
     this.renderMethodOptions();
+    this.renderStepper();
   }
 
   /* STEP 4: ACTIVE WIPE */
@@ -383,6 +640,11 @@ class WipeXApp {
     this.goToPhase(4);
     this.resetWipeCanvas();
     this.isWiping = true;
+    this.wipeCompleted = false;
+    this.phaseCompleted[4] = false;
+    this.phaseCompleted[5] = false;
+    this.phaseCompleted[6] = false;
+    this.renderStepper();
     const cryptoHelper = window.AegisCrypto || window.WipeXCrypto;
     this.currentNonce = cryptoHelper.generateNonce();
 
@@ -411,27 +673,31 @@ class WipeXApp {
     const isDamaged = (this.selectedDevice.expectedOutcome === 'RED');
 
     clearInterval(this.wipeInterval);
+    const self = this;
     this.wipeInterval = setInterval(() => {
       if (currentCluster < totalClusters) {
         if (currentCluster > 0) {
-          this.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
+          self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
         }
-        this.sectorStates[currentCluster] = 1;
+        self.sectorStates[currentCluster] = 1;
         currentCluster++;
-        this.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
-        this.updateWipeUI();
-        this.drawCanvas();
+        self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
+        self.updateWipeUI();
+        self.drawCanvas();
       } else {
-        this.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
+        self.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
         for (let i = 0; i < totalClusters; i++) {
-          this.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
+          self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
         }
-        this.wipeProgress = 100;
-        this.isWiping = false;
-        clearInterval(this.wipeInterval);
-        this.updateWipeUI();
-        this.drawCanvas();
+        self.wipeProgress = 100;
+        self.isWiping = false;
+        self.wipeCompleted = true;
+        self.phaseCompleted[4] = true;
+        clearInterval(self.wipeInterval);
+        self.updateWipeUI();
+        self.drawCanvas();
         if (proceedBtn) proceedBtn.disabled = false;
+        self.renderStepper();
       }
     }, 40);
   }

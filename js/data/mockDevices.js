@@ -35,7 +35,22 @@ window.MOCK_DEVICES = [
       { id: "0x0E", name: "Media & Data Integrity Errors", raw: "0", threshold: "0", status: "VERIFIED" }
     ],
     recommendedMethod: "purge-nvme-crypto",
-    expectedOutcome: "GREEN"
+    expectedOutcome: "GREEN",
+    capacityUsedBytes: 642000000000,
+    capacityUsedPct: 64.2,
+    isAlreadyClean: false,
+    currentFiles: [
+      { name: "Documents/Resume.pdf", size: "284 KB" },
+      { name: "Photos/Vacation.zip", size: "3.8 GB" },
+      { name: "Projects/source-code.tar.gz", size: "864 MB" },
+      { name: "Backups/TimeMachine.sparseimage", size: "412 GB" },
+      { name: "Downloads/installer.dmg", size: "14.2 GB" }
+    ],
+    deletedRecoverableFiles: [
+      { name: "Documents/old-passwords.txt", size: "12 KB", recoverability: "High" },
+      { name: "Photos/IMG_2044.jpg", size: "5.4 MB", recoverability: "Medium" },
+      { name: "Trash/private-notes.docx", size: "96 KB", recoverability: "High" }
+    ]
   },
   {
     id: "dev-hdd-seagate-barracuda",
@@ -68,7 +83,22 @@ window.MOCK_DEVICES = [
       { id: "0xC6", name: "Offline Uncorrectable Sectors", raw: "0", threshold: "0", status: "OPTIMAL" }
     ],
     recommendedMethod: "purge-ata-enhanced",
-    expectedOutcome: "YELLOW"
+    expectedOutcome: "YELLOW",
+    capacityUsedBytes: 1844000000000,
+    capacityUsedPct: 92.2,
+    isAlreadyClean: false,
+    currentFiles: [
+      { name: "Media/Movies/collection.mkv", size: "847 GB" },
+      { name: "Backup/2023_full.bak", size: "612 GB" },
+      { name: "Music/FLAC_Library.tar", size: "184 GB" },
+      { name: "Documents/taxes-2022.pdf", size: "4.8 MB" }
+    ],
+    deletedRecoverableFiles: [
+      { name: "Old_Projects/legacy_source.zip", size: "2.1 GB", recoverability: "Medium" },
+      { name: "Personal/letters-archive.pst", size: "846 MB", recoverability: "High" },
+      { name: "Photos/family-2019.raw", size: "340 MB", recoverability: "Medium" },
+      { name: "Deleted/bank-statements.pdf", size: "12 MB", recoverability: "High" }
+    ]
   },
   {
     id: "dev-ssd-kingston-damaged",
@@ -100,7 +130,18 @@ window.MOCK_DEVICES = [
       { id: "0xC5", name: "Current Pending Sectors", raw: "16 Blocks", threshold: "0", status: "FAILED" }
     ],
     recommendedMethod: "destroy-physical",
-    expectedOutcome: "RED"
+    expectedOutcome: "RED",
+    capacityUsedBytes: 312000000000,
+    capacityUsedPct: 65.0,
+    isAlreadyClean: false,
+    currentFiles: [
+      { name: "Work/Customer-DB.mdb", size: "284 GB" },
+      { name: "Private/keys.pem", size: "8 KB" }
+    ],
+    deletedRecoverableFiles: [
+      { name: "Scrapped/old-customer-records.csv", size: "18 GB", recoverability: "High" },
+      { name: "Trash/employee-ssn-sheet.xlsx", size: "6.2 MB", recoverability: "High" }
+    ]
   },
   {
     id: "dev-sandisk-hpa-hidden",
@@ -131,6 +172,51 @@ window.MOCK_DEVICES = [
       { id: "0xBB", name: "Reported Uncorrectable", raw: "0", threshold: "0", status: "CLEAN" }
     ],
     recommendedMethod: "purge-ata-secure",
-    expectedOutcome: "GREEN"
+    expectedOutcome: "GREEN",
+    capacityUsedBytes: 218000000000,
+    capacityUsedPct: 42.6,
+    isAlreadyClean: false,
+    currentFiles: [
+      { name: "Software/VMs/ubuntu.qcow2", size: "128 GB" },
+      { name: "Projects/webapp/node_modules/", size: "44 GB" },
+      { name: "Assets/brand-assets.psd", size: "1.2 GB" }
+    ],
+    deletedRecoverableFiles: [
+      { name: "Hidden/old_vm_snapshot.img", size: "28 GB", recoverability: "High (in HPA)" }
+    ]
+  },
+  {
+    id: "dev-crucial-clean-256",
+    model: "Crucial MX500 256GB (Already Wiped)",
+    type: "SATA SSD",
+    interface: "SATA 3.3 (6.0 Gb/s)",
+    capacity: "256.1 GB (500,118,192 LBA Sectors)",
+    capacityBytes: 256060514304,
+    serialNumber: "CRUCIAL-500MX-CLEAN99",
+    maskedSerial: "CRUC****LEAN99",
+    firmware: "M3CR023",
+    healthStatus: "HEALTHY_ALREADY_CLEAN",
+    healthScore: 96,
+    reallocatedSectors: 0,
+    wearLevel: "94% Remaining",
+    powerOnHours: "5,120 Hours",
+    temperature: "29°C",
+    hpaDetected: false,
+    hpaSize: "0 MB",
+    dcoDetected: false,
+    overProvisioning: "7.0% (17.9 GB)",
+    cryptoEraseSupported: true,
+    ataSecurityFrozen: false,
+    smartAttributes: [
+      { id: "0x05", name: "Reallocated Sector Count", raw: "0", threshold: "10", status: "CLEAN" },
+      { id: "0xE7", name: "SSD Life Left", raw: "94%", threshold: "10%", status: "OPTIMAL" }
+    ],
+    recommendedMethod: "purge-ata-secure",
+    expectedOutcome: "GREEN",
+    capacityUsedBytes: 0,
+    capacityUsedPct: 0.0,
+    isAlreadyClean: true,
+    currentFiles: [],
+    deletedRecoverableFiles: []
   }
 ];
