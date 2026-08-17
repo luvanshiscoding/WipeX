@@ -64,3 +64,5 @@ window.AegisCrypto = {
     ].join('|');
   }
 };
+
+window.WipeXCrypto = window.AegisCrypto;

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aegis Wipe | Easy Data Sanitization & Drive Certification</title>
-  <meta name="description" content="Aegis Wipe - Simple, secure data wiping and tamper-proof certificate generation for hard drives and SSDs.">
+  <title>WipeX | Zero-Trust Data Sanitization & Drive Certification</title>
+  <meta name="description" content="WipeX - Secure data wiping, Shannon entropy verification, and tamper-proof compliance certificates for NVMe, SSDs, and hard drives.">
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,12 +22,12 @@
         </svg>
       </div>
       <div class="brand-text">
-        <span class="brand-name">Aegis Wipe</span>
-        <span class="brand-sub">Secure Data Erasure & Drive Certification</span>
+        <span class="brand-name">WipeX</span>
+        <span class="brand-sub">Zero-Trust Data Erasure & Drive Certification</span>
       </div>
     </div>
 
-    <!-- Navigation Tabs -->
+    <!-- Navigation -->
     <nav class="header-nav">
       <button class="nav-tab active" id="nav-workflow-btn" onclick="app.switchView('workflow')">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -166,9 +166,7 @@
               <canvas id="sector-canvas" width="600" height="160"></canvas>
             </div>
 
-            <div class="demo-controls">
-              <button class="btn btn-secondary btn-sm" onclick="app.speedUpWipe()">Fast-Forward Demo ⏩</button>
-            </div>
+
           </div>
 
           <div class="action-footer">
@@ -257,7 +255,7 @@
                   </svg>
                   <div class="seal-meta">
                     <div class="seal-title">CERTIFICATE OF DATA SANITIZATION</div>
-                    <div class="seal-sub">Aegis Media Sanitization & Hardware Verification</div>
+                    <div class="seal-sub">WipeX Media Sanitization & Hardware Verification</div>
                   </div>
                 </div>
 
@@ -355,7 +353,7 @@
         <div class="portal-search-box">
           <div class="search-input-group">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="portal-search-input" placeholder="Enter Certificate ID (e.g. AEGIS-2026-980PRO-8F2B)..." value="AEGIS-2026-980PRO-8F2B">
+            <input type="text" id="portal-search-input" placeholder="Enter Certificate ID or Drive Serial..." value="AEGIS-2026-980PRO-8F2B" onkeydown="if(event.key==='Enter') app.verifyLookup()">
             <button class="btn btn-primary" onclick="app.verifyLookup()">Check</button>
           </div>
 

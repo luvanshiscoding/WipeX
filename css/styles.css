@@ -446,6 +446,26 @@ body {
   border-radius: var(--radius-md);
   font-size: 13px;
   font-weight: 500;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.simple-alert-box.alert-green {
+  background-color: var(--emerald-bg);
+  border-color: var(--emerald-border);
+  color: var(--emerald-text);
+}
+
+.simple-alert-box.alert-yellow {
+  background-color: var(--amber-bg);
+  border-color: var(--amber-border);
+  color: var(--amber-text);
+}
+
+.simple-alert-box.alert-red {
+  background-color: var(--red-bg);
+  border-color: var(--red-border);
+  color: var(--red-text);
 }
 
 /* ==========================================================================
@@ -1092,6 +1112,10 @@ body {
 
 /* Print */
 @media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   body {
     background-color: #ffffff !important;
   }

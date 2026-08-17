@@ -1,4 +1,4 @@
-# Aegis Wipe 🛡️
+# WipeX 🛡️
 
 **Zero-Trust Data Sanitization & Hardware-Bound Verification Platform**
 
@@ -27,17 +27,25 @@ A modern, user-friendly platform for secure data erasure, independent verificati
 
 ## 🚀 Getting Started
 
-### 1. Run Directly (No installation needed)
-Simply open `index.html` in any web browser:
+### 1. Run the FastAPI Backend Service
 ```bash
-open index.html
+pip install -r requirements.txt
+python3 main.py
 ```
+The REST API server will start at `http://localhost:8000` with interactive Swagger docs at `http://localhost:8000/docs`.
 
-### 2. Run with Local Web Server
+### 2. Run the Frontend UI
+Open `index.html` directly in any web browser or serve via:
 ```bash
 python3 -m http.server 5173
 ```
-Then visit `http://localhost:5173`.
+Then visit `http://localhost:5173`. The UI automatically binds to the live FastAPI backend when running at port 8000, with instant client-side standalone fallback if offline.
+
+### 3. Database Schema (PostgreSQL)
+To initialize the central ledger in PostgreSQL:
+```bash
+psql -U postgres -d wipex -f database.sql
+```
 
 ---
 
@@ -49,7 +57,7 @@ Then visit `http://localhost:5173`.
 ├── css/
 │   └── styles.css              # Clean, modern light design system
 ├── js/
-│   ├── app.js                  # Master application controller
+│   ├── app.js                  # Master application controller (Hybrid API & Offline)
 │   ├── data/
 │   │   ├── mockDevices.js      # Storage drive presets (NVMe, SATA, Damaged)
 │   │   ├── nistStandards.js    # NIST SP 800-88 sanitization standards
@@ -58,7 +66,13 @@ Then visit `http://localhost:5173`.
 │       ├── crypto.js           # SHA-256 hashing & signature simulator
 │       ├── entropy.js          # Shannon Entropy calculation & sector generator
 │       └── qrGenerator.js      # Standalone vector SVG QR code generator
-├── BACKEND_AND_PROJECT_SPEC.md # Full FastAPI/PostgreSQL backend architecture & AI prompt
+├── main.py                     # FastAPI REST backend service
+├── wipe_engine.py              # Low-level ATA/NVMe hardware sanitizer
+├── entropy_auditor.py          # Mathematical Shannon entropy auditor
+├── crypto_signer.py            # Hardware-bound SHA-256 / ECDSA signer
+├── database.sql                # Complete PostgreSQL central ledger DDL & seeds
+├── requirements.txt            # Python dependencies
+├── BACKEND_AND_PROJECT_SPEC.md # Full architecture & technical specification
 └── README.md
 ```
 

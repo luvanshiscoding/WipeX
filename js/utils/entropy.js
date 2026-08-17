@@ -96,3 +96,5 @@ window.AegisEntropy = {
     return outputLines.join('');
   }
 };
+
+window.WipeXEntropy = window.AegisEntropy;

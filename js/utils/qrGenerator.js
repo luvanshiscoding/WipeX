@@ -94,3 +94,5 @@ window.AegisQR = {
     containerElement.innerHTML = svg;
   }
 };
+
+window.WipeXQR = window.AegisQR;
