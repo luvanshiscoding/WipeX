@@ -24,6 +24,9 @@ class WipeXApp {
     this.wipeCompleted = false;
 
     this.verificationCompleted = false;
+    this.explorerFilter = 'all';
+    this.destructionCountdownTimer = null;
+    this.destructionCountdown = 10;
 
     this.sectorStates = new Array(256).fill(0);
     this.currentNonce = (window.AegisCrypto || window.WipeXCrypto).generateNonce();
@@ -107,16 +110,19 @@ class WipeXApp {
 
     let devices = [];
     let backendError = false;
+    let backendErrorMessage = '';
 
     try {
       const res = await fetch(`${this.apiBaseUrl}/api/devices`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('API error');
+      if (!res.ok) throw new Error(`API HTTP ${res.status}`);
       devices = await res.json();
     } catch (e) {
       backendError = true;
-      devices = (window.MOCK_DEVICES || []).map(d => ({ ...d }));
+      backendErrorMessage = e && e.message ? e.message : 'Connection failed';
+      devices = [];
     }
 
+    // Deduplicate by devicePath / serialNumber — no duplicates allowed
     const seenPaths = new Set();
     const seenSerials = new Set();
     const deduped = [];
@@ -130,23 +136,19 @@ class WipeXApp {
       if (path) seenPaths.add(path);
       else if (idKey) seenPaths.add(idKey);
       if (serial) seenSerials.add(serial);
-      if (typeof dev.capacityUsedPct === 'undefined') {
-        dev.capacityUsedBytes = 0;
-        dev.capacityUsedPct = 0;
-        dev.isAlreadyClean = false;
-        dev.currentFiles = [];
-        dev.deletedRecoverableFiles = [];
-      }
       deduped.push(dev);
     }
 
     this.devices = deduped;
 
     let alertHtml = '';
-    if (backendError && this.devices.length) {
+    if (backendError) {
       alertHtml = `
-        <div data-backend-banner style="text-align:center; padding: 10px 0; margin-bottom: 10px; font-size:12px; color:var(--text-muted);">
-          ⚠️ Backend offline. Using demo device presets.
+        <div data-backend-banner style="text-align:center; padding: 12px 14px; margin-bottom: 12px; font-size:13px; color:var(--red-text); background:var(--red-bg); border:1.5px solid var(--red-border); border-radius:8px;">
+          🚨 Backend unreachable (<code class="font-mono">${backendErrorMessage}</code>). Start the backend:
+          <div style="margin-top:6px; font-family:var(--font-mono); text-align:left; background:#fff; border:1px solid var(--border-subtle); padding:8px 10px; border-radius:6px; color:var(--text-primary); display:inline-block;">
+            pip3 install -r requirements.txt && python3 main.py
+          </div>
         </div>
       `;
     }
@@ -226,101 +228,6 @@ class WipeXApp {
       btn.disabled = !this.selectedDevice;
     }
     this.phaseCompleted[1] = !!this.selectedDevice;
-  }
-
-  renderDriveStatus() {
-    const panel = document.getElementById('drive-status-panel');
-    if (!panel) return;
-    const dev = this.selectedDevice;
-    if (!dev) {
-      panel.style.display = 'none';
-      return;
-    }
-    panel.style.display = 'block';
-
-    const cleanBadge = document.getElementById('clean-status-badge');
-    const capLabel = document.getElementById('capacity-values-label');
-    const capBar = document.getElementById('capacity-bar-used');
-    const curCount = document.getElementById('current-files-count');
-    const curList = document.getElementById('current-files-list');
-    const recCount = document.getElementById('recoverable-count');
-    const recList = document.getElementById('recoverable-files-list');
-    const summaryBox = document.getElementById('summary-box');
-
-    const pct = typeof dev.capacityUsedPct === 'number' ? dev.capacityUsedPct : 0;
-    const usedBytes = dev.capacityUsedBytes || 0;
-    const totalBytes = dev.capacityBytes || 0;
-    const isClean = !!dev.isAlreadyClean;
-    const currentFiles = Array.isArray(dev.currentFiles) ? dev.currentFiles : [];
-    const recoverableFiles = Array.isArray(dev.deletedRecoverableFiles) ? dev.deletedRecoverableFiles : [];
-
-    if (cleanBadge) {
-      cleanBadge.textContent = isClean ? '✓ DRIVE IS ALREADY CLEAN' : '⚠ CONTAINS DATA — WIPE REQUIRED';
-      cleanBadge.className = 'clean-status-badge ' + (isClean ? 'status-clean' : 'status-data');
-    }
-    if (capLabel) {
-      capLabel.textContent = `${this.formatBytes(usedBytes)} / ${this.formatBytes(totalBytes)} (${pct.toFixed(1)}%)`;
-    }
-    if (capBar) {
-      capBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-      if (isClean) capBar.style.background = 'linear-gradient(90deg,#10b981,#059669)';
-      else capBar.style.background = 'linear-gradient(90deg,#3b82f6,#2563eb)';
-    }
-
-    if (curCount) curCount.textContent = currentFiles.length;
-    if (curList) {
-      if (!currentFiles.length) {
-        curList.innerHTML = `<li class="empty-list">✓ No active files — drive is empty</li>`;
-      } else {
-        curList.innerHTML = currentFiles.map(f =>
-          `<li><span class="file-name" title="${f.name}">${f.name}</span><span class="file-size">${f.size}</span></li>`
-        ).join('');
-      }
-    }
-
-    if (recCount) recCount.textContent = recoverableFiles.length;
-    if (recList) {
-      if (!recoverableFiles.length) {
-        recList.innerHTML = `<li class="empty-list">✓ Nothing recoverable remaining</li>`;
-      } else {
-        recList.innerHTML = recoverableFiles.map(f => {
-          const cls = (f.recoverability || 'medium').toLowerCase().includes('high') ? 'high' : 'medium';
-          return `<li>
-            <span class="file-name" title="${f.name}">${f.name}</span>
-            <span style="display:flex;align-items:center;gap:4px;">
-              <span class="rec-chance ${cls}">${f.recoverability}</span>
-              <span class="file-size">${f.size}</span>
-            </span>
-          </li>`;
-        }).join('');
-      }
-    }
-
-    if (summaryBox) {
-      const rows = [];
-      if (isClean) {
-        rows.push(`<div class="summary-row success"><span class="sr-label">Pre-Wipe Status</span><span class="sr-value text-emerald">ALREADY CLEAN</span></div>`);
-      } else {
-        rows.push(`<div class="summary-row ${pct > 80 ? 'warning' : ''}"><span class="sr-label">Data on Drive</span><span class="sr-value">${pct.toFixed(1)}%</span></div>`);
-      }
-      rows.push(`<div class="summary-row"><span class="sr-label">Active Files</span><span class="sr-value">${currentFiles.length}</span></div>`);
-      const recRiskClass = recoverableFiles.length === 0 ? 'success' : (recoverableFiles.filter(f => (f.recoverability || '').toLowerCase().includes('high')).length > 0 ? 'danger' : 'warning');
-      rows.push(`<div class="summary-row ${recRiskClass}"><span class="sr-label">Recoverable Traces</span><span class="sr-value">${recoverableFiles.length}</span></div>`);
-      const bootRowClass = dev.isBootDrive ? 'danger' : 'success';
-      rows.push(`<div class="summary-row ${bootRowClass}"><span class="sr-label">OS Boot Drive</span><span class="sr-value ${dev.isBootDrive ? 'text-red' : 'text-emerald'}">${dev.isBootDrive ? 'YES' : 'NO'}</span></div>`);
-
-      let actionBox = '';
-      if (dev.expectedOutcome === 'RED') {
-        actionBox = `<div class="summary-action-box warn">🚨 Hardware is failing — this drive REQUIRES physical shredding after wipe.</div>`;
-      } else if (isClean) {
-        actionBox = `<div class="summary-action-box safe">✓ Drive already reads as empty. Continuing still recommended for formal certification.</div>`;
-      } else if (recoverableFiles.length > 0) {
-        actionBox = `<div class="summary-action-box warn">⚠ Wipe will overwrite active files AND purge ${recoverableFiles.length} recoverable deleted item(s).</div>`;
-      } else {
-        actionBox = `<div class="summary-action-box safe">✓ Ready for sanitization. Wipe will overwrite ${currentFiles.length} active file(s).</div>`;
-      }
-      summaryBox.innerHTML = rows.join('') + actionBox;
-    }
   }
 
   renderStepper() {
@@ -636,72 +543,6 @@ class WipeXApp {
     }
   }
 
-  async startWipeExecution() {
-    this.goToPhase(4);
-    this.resetWipeCanvas();
-    this.isWiping = true;
-    this.wipeCompleted = false;
-    this.phaseCompleted[4] = false;
-    this.phaseCompleted[5] = false;
-    this.phaseCompleted[6] = false;
-    this.renderStepper();
-    const cryptoHelper = window.AegisCrypto || window.WipeXCrypto;
-    this.currentNonce = cryptoHelper.generateNonce();
-
-    const proceedBtn = document.getElementById('btn-proceed-phase-5');
-    if (proceedBtn) proceedBtn.disabled = true;
-
-    // Start wipe on backend (records to DB, runs hardware command)
-    try {
-      const res = await fetch(`${this.apiBaseUrl}/api/wipe/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: this.selectedDevice.id,
-          methodId: this.selectedMethodId
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        this.activeWipeId = data.wipeId;
-        if (data.nonce) this.currentNonce = data.nonce;
-      }
-    } catch (e) { /* handle below */ }
-
-    const totalClusters = 256;
-    let currentCluster = 0;
-    const isDamaged = (this.selectedDevice.expectedOutcome === 'RED');
-
-    clearInterval(this.wipeInterval);
-    const self = this;
-    this.wipeInterval = setInterval(() => {
-      if (currentCluster < totalClusters) {
-        if (currentCluster > 0) {
-          self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
-        }
-        self.sectorStates[currentCluster] = 1;
-        currentCluster++;
-        self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
-        self.updateWipeUI();
-        self.drawCanvas();
-      } else {
-        self.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
-        for (let i = 0; i < totalClusters; i++) {
-          self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
-        }
-        self.wipeProgress = 100;
-        self.isWiping = false;
-        self.wipeCompleted = true;
-        self.phaseCompleted[4] = true;
-        clearInterval(self.wipeInterval);
-        self.updateWipeUI();
-        self.drawCanvas();
-        if (proceedBtn) proceedBtn.disabled = false;
-        self.renderStepper();
-      }
-    }, 40);
-  }
-
   updateWipeUI() {
     const percentEl = document.getElementById('wipe-percent-display');
     const fillEl = document.getElementById('wipe-progress-bar-fill');
@@ -718,8 +559,6 @@ class WipeXApp {
       }
     }
   }
-
-  /* STEP 5: VERIFICATION */
   async renderVerification() {
     const card = document.getElementById('verification-result-card');
     const title = document.getElementById('verify-title');

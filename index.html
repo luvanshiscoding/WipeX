@@ -82,17 +82,52 @@
           <!-- Drive Status Panel (appears when a drive is selected) -->
           <div class="drive-status-panel" id="drive-status-panel" style="display:none;">
             <div class="drive-status-header">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-                <h3 class="drive-status-title">Drive Status & Content Overview</h3>
+              <div class="drive-status-title">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                <span>Drive Status & Content Viewer</span>
               </div>
               <div class="clean-status-badge" id="clean-status-badge"></div>
             </div>
 
-            <!-- Capacity Usage Bar -->
+            <!-- Explorer Toolbar -->
+            <div class="explorer-toolbar">
+              <button class="toolbar-btn active" id="toolbar-all" onclick="app.filterExplorerView('all')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                All Files
+              </button>
+              <button class="toolbar-btn" id="toolbar-active" onclick="app.filterExplorerView('active')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Active
+              </button>
+              <button class="toolbar-btn" id="toolbar-recoverable" onclick="app.filterExplorerView('recoverable')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                Recoverable
+              </button>
+              <div class="toolbar-divider"></div>
+              <div class="view-toggle-group">
+                <button class="view-toggle-btn active" onclick="app.toggleExplorerView('list')" title="List View">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                </button>
+                <button class="view-toggle-btn" onclick="app.toggleExplorerView('details')" title="Details View">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Address Bar -->
+            <div class="explorer-address-bar">
+              <div class="address-bar-path">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg>
+                <span class="path-segment" id="address-drive-name">This Drive</span>
+                <span class="path-separator">›</span>
+                <span class="path-segment">All Content</span>
+              </div>
+            </div>
+
+            <!-- Capacity Section -->
             <div class="capacity-section">
               <div class="capacity-labels">
-                <span><strong>Capacity Used</strong></span>
+                <span><strong>Storage Used</strong></span>
                 <span class="capacity-values" id="capacity-values-label">—</span>
               </div>
               <div class="capacity-bar-track">
@@ -100,38 +135,67 @@
               </div>
             </div>
 
-            <!-- Three content columns -->
-            <div class="drive-status-grid">
-              <div class="status-col current-files-col">
-                <div class="status-col-header">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                  <span>Files Currently on Drive</span>
-                  <span class="count-badge" id="current-files-count">0</span>
+            <!-- Explorer Main -->
+            <div class="explorer-main">
+              <!-- Sidebar -->
+              <div class="explorer-sidebar">
+                <div class="sidebar-section">
+                  <div class="sidebar-section-title">Folders</div>
+                  <div class="sidebar-item active" onclick="app.filterExplorerView('all')">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span>All Content</span>
+                    <span class="sidebar-item-badge" id="sidebar-all-count">0</span>
+                  </div>
+                  <div class="sidebar-item" onclick="app.filterExplorerView('active')">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span>Active Files</span>
+                    <span class="sidebar-item-badge" id="sidebar-active-count">0</span>
+                  </div>
+                  <div class="sidebar-item" onclick="app.filterExplorerView('recoverable')">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                    <span>Recoverable</span>
+                    <span class="sidebar-item-badge warning" id="sidebar-recoverable-count">0</span>
+                  </div>
                 </div>
-                <ul class="file-list" id="current-files-list">
-                  <li class="empty-list">No data</li>
-                </ul>
+                <div class="sidebar-section">
+                  <div class="sidebar-section-title">Drive Info</div>
+                  <div class="sidebar-item">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>Properties</span>
+                  </div>
+                </div>
               </div>
 
-              <div class="status-col recoverable-col">
-                <div class="status-col-header">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-                  <span>Deleted (But Recoverable)</span>
-                  <span class="count-badge badge-amber" id="recoverable-count">0</span>
+              <!-- File List Content -->
+              <div class="explorer-content">
+                <div class="file-explorer-list" id="file-explorer-list">
+                  <!-- Tree view populated dynamically -->
                 </div>
-                <ul class="file-list" id="recoverable-files-list">
-                  <li class="empty-list">No recoverable items</li>
-                </ul>
               </div>
+            </div>
 
-              <div class="status-col summary-col">
-                <div class="status-col-header">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                  <span>Assessment Summary</span>
+            <!-- Summary Panel -->
+            <div class="explorer-summary-panel">
+              <div class="summary-grid">
+                <div class="summary-stat">
+                  <span class="summary-stat-label">Total Files</span>
+                  <span class="summary-stat-value" id="summary-total-files">0</span>
                 </div>
-                <div class="summary-box" id="summary-box">
-                  <!-- Populated dynamically -->
+                <div class="summary-stat">
+                  <span class="summary-stat-label">Active Files</span>
+                  <span class="summary-stat-value success" id="summary-active-files">0</span>
                 </div>
+                <div class="summary-stat">
+                  <span class="summary-stat-label">Recoverable</span>
+                  <span class="summary-stat-value warning" id="summary-recoverable-files">0</span>
+                </div>
+                <div class="summary-stat">
+                  <span class="summary-stat-label">Boot Drive</span>
+                  <span class="summary-stat-value" id="summary-boot-drive">No</span>
+                </div>
+              </div>
+              <div class="summary-action-box safe" id="summary-action-box">
+                <!-- Populated dynamically -->
               </div>
             </div>
           </div>
@@ -447,8 +511,113 @@
   <script src="js/utils/entropy.js"></script>
   <script src="js/utils/qrGenerator.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/app_drive_status.js"></script>
+  <script src="js/app_modals.js"></script>
+  <script src="js/app_tree_view.js"></script>
 
   <!-- Step-blocked toast -->
   <div class="step-blocked-toast" id="step-blocked-toast"></div>
+
+  <!-- Warning Modal: Physical Destruction (10-second countdown with checkbox) -->
+  <div class="warning-modal-overlay" id="destruction-modal-overlay" style="display:none;">
+    <div class="warning-modal danger-mode">
+      <div class="modal-header">
+        <div class="modal-icon-circle">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h2 class="modal-title">Physical Destruction Required</h2>
+        <p class="modal-subtitle">This action cannot be undone</p>
+      </div>
+      <div class="modal-body">
+        <p class="modal-message">
+          <strong>Warning:</strong> This drive contains physically damaged sectors that cannot be sanitized by software.
+          The only secure option is mechanical disintegration (shredding to &lt;2mm particles).
+        </p>
+        <div class="modal-details">
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Drive</span>
+            <span class="modal-detail-value" id="destruction-modal-drive">—</span>
+          </div>
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Bad Sectors</span>
+            <span class="modal-detail-value" id="destruction-modal-bad-sectors">—</span>
+          </div>
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Action Required</span>
+            <span class="modal-detail-value">Physical Shredding</span>
+          </div>
+        </div>
+        <div class="modal-countdown">
+          <div class="modal-countdown-label">Proceeding in</div>
+          <div class="modal-countdown-value" id="destruction-countdown">10</div>
+        </div>
+        <div class="modal-checkbox-wrapper">
+          <input type="checkbox" class="modal-checkbox" id="destruction-confirm-checkbox">
+          <label class="modal-checkbox-label" for="destruction-confirm-checkbox">
+            I understand this drive must be physically destroyed and I will transport it to a certified shredding facility.
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.cancelDestructionModal()">Cancel</button>
+        <button class="btn btn-primary" id="destruction-proceed-btn" onclick="app.confirmDestruction()" disabled style="background:#dc2626;border-color:#dc2626;">
+          Mark for Destruction
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Warning Modal: Normal Caution for other wipe methods -->
+  <div class="warning-modal-overlay" id="caution-modal-overlay" style="display:none;">
+    <div class="warning-modal caution-mode">
+      <div class="modal-header">
+        <div class="modal-icon-circle">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <h2 class="modal-title">Confirm Secure Wipe</h2>
+        <p class="modal-subtitle">All data will be permanently erased</p>
+      </div>
+      <div class="modal-body">
+        <p class="modal-message">
+          You are about to permanently erase all data on this drive. This action cannot be undone.
+          Please confirm you have backed up any important files before proceeding.
+        </p>
+        <div class="modal-details">
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Drive</span>
+            <span class="modal-detail-value" id="caution-modal-drive">—</span>
+          </div>
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Method</span>
+            <span class="modal-detail-value" id="caution-modal-method">—</span>
+          </div>
+          <div class="modal-detail-row">
+            <span class="modal-detail-label">Files to Erase</span>
+            <span class="modal-detail-value" id="caution-modal-files">—</span>
+          </div>
+        </div>
+        <div class="modal-checkbox-wrapper caution">
+          <input type="checkbox" class="modal-checkbox" id="caution-confirm-checkbox">
+          <label class="modal-checkbox-label" for="caution-confirm-checkbox">
+            I confirm that I want to permanently erase all data on this drive.
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.cancelCautionModal()">Cancel</button>
+        <button class="btn btn-primary" id="caution-proceed-btn" onclick="app.confirmWipe()" disabled>
+          Start Secure Wipe
+        </button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

@@ -79,21 +79,8 @@ def init_db():
             except Exception as e:
                 conn.rollback()
         
-        # Seed reference certificates in Postgres if empty
-        cursor.execute("SELECT COUNT(*) FROM certificates")
-        if cursor.fetchone()[0] == 0:
-            seed_certs = [
-                ("AEGIS-2026-980PRO-8F2B", None, "Samsung SSD 980 PRO 1TB", "S6B0NF0R419823X", "NVMe PCIe 4.0 SSD", "1,000.2 GB", "Deep Hardware Purge (NIST SP 800-88 Crypto Erase)", "CLEANED (100% Zero Data)", "GREEN", "PASSED (100% Zero Confirmation)", "7e8b9f02c418a36d912", "a4f91d8e6c73b021a884f0923b7e12908c6a7e5f1d9c02b3e4f5a6b7c8d9e0f1", "3045022100a4f91d8e6c73b021a884f0923b7e129002208c6a7e5f1d9c02b3e4f5a6b7c8d9e0f1VALID", "https://wipex.app/verify?cert=AEGIS-2026-980PRO-8F2B", False, "Authentic & Hardware-Bound. This certificate has not been altered or reused."),
-                ("AEGIS-2026-BARRACUDA-3C1A", None, "Seagate Barracuda 2TB 3.5\" HDD", "W9A2L88K901", "Magnetic HDD", "2,000.4 GB", "Standard Clear (NIST SP 800-88 Overwrite)", "CLEANED (100% Zero Data)", "YELLOW", "PASSED (Zero Residual Data)", "4a1c89f30b91e772d11", "f01c891e3271ba67209148cba0129845ef92a83b1029c78491823901bcae8129", "3045022100f01c891e3271ba67209148cba01298450220ef92a83b1029c78491823901bcae8129VALID", "https://wipex.app/verify?cert=AEGIS-2026-BARRACUDA-3C1A", False, "Authentic Wipe Certificate. Note: Drive has high operational lifetime (43,820 hrs); safe from data leak but component reliability is degraded."),
-                ("AEGIS-2026-KINGSTON-RED-99", None, "Kingston A400 480GB SATA SSD", "50026B7682910F4A", "SATA SSD", "480.1 GB", "Mandatory Mechanical Disintegration (<2mm)", "NOT CLEANED (48 Bad Sectors)", "RED", "FAILED — 48 Bad Sectors Unwiped (Data Risk)", "98ab21034f81c990234", "9823ca019842bf901c82410a8837190248bf0912c01824761093847a192837bc", "30450221009823ca019842bf901c82410a88371902022048bf0912c01824761093847a192837bcVALID", "https://wipex.app/verify?cert=AEGIS-2026-KINGSTON-RED-99", False, "Mandated Physical Destruction Manifest Issued. This media is prohibited from resale or circular reuse due to unerasable hardware sectors."),
-                ("AEGIS-FORGED-FAKE-CERT-00", None, "Samsung SSD 980 PRO 1TB [Forged Copy]", "S6B0NF0R419823X", "NVMe SSD", "1,000.2 GB", "Forged Certificate Attempt", "FAILED INTEGRITY", "FRAUD", "FAILED CRYPTOGRAPHIC INTEGRITY", "INVALID_NONCE_000", "0000000000000000000000000000000000000000000000000000000000000000", "INVALID_SIGNATURE", "https://wipex.app/verify?cert=AEGIS-FORGED-FAKE-CERT-00", True, "SECURITY ALERT: The digital signature and hardware binding hash do not match the central ledger. This certificate has been modified, forged, or transferred to an unauthorized drive.")
-            ]
-            cursor.executemany("""
-                INSERT INTO certificates (certificate_id, wipe_id, device_model, device_serial, storage_type, capacity_display, sanitization_method, cleaned_status, trust_score, audit_result, pre_wipe_nonce, sha256_digest, digital_signature, qr_payload, tamper_detected, verdict)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (certificate_id) DO NOTHING
-            """, seed_certs)
-            conn.commit()
+        # NO SEED DATA EVER — devices and certificates only come from real
+        # hardware probes and real wipe operations.
         conn.close()
         return
 
@@ -171,31 +158,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cert_serial ON certificates(serial_number)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cert_id ON certificates(certificate_id)")
 
-    cursor.execute("SELECT COUNT(*) FROM devices")
-    if cursor.fetchone()[0] == 0:
-        seed_devices = [
-            ("dev-nvme-samsung-980", "Samsung SSD 980 PRO 1TB", "S6B0NF0R419823X", "NVMe SSD", "NVMe 1.4 / PCIe Gen 4 x4", "1,000.2 GB (1,953,525,168 LBA Sectors)", 1000204886016, "S6B0****19823X", "5B2QGXA7", "HEALTHY", 98, 0, "0 MB", 0, 0, "1,420 Hours", "34°C", "98% Remaining", 1, 1, "purge-nvme-crypto", "GREEN"),
-            ("dev-hdd-seagate-barracuda", "Seagate Barracuda 2TB 3.5\" HDD", "W9A2L88K901", "Magnetic HDD", "SATA 3.3 (6.0 Gb/s) / 7200 RPM", "2,000.4 GB (3,907,029,168 LBA Sectors)", 2000398934016, "W9A2****88K901", "CC43", "CAUTION_AGING", 68, 0, "0 MB", 0, 0, "43,820 Hours", "41°C", "N/A (Mechanical)", 0, 0, "clear-single", "YELLOW"),
-            ("dev-ssd-kingston-damaged", "Kingston A400 480GB SATA SSD", "50026B7682910F4A", "SATA SSD", "SATA 3.0 (6.0 Gb/s)", "480.1 GB (937,703,088 LBA Sectors)", 480103981056, "5002****82910F4A", "SBFKB1H5", "FAILING_BAD_SECTORS", 22, 0, "0 MB", 0, 48, "29,410 Hours", "48°C", "14% Remaining", 0, 1, "destroy-physical", "RED"),
-            ("dev-sandisk-hpa-hidden", "SanDisk Ultra 3D 512GB (HPA Partition Locked)", "SD-99281-HPA02", "SATA SSD", "SATA 3.2 (6.0 Gb/s)", "512.1 GB (1,000,215,216 LBA Sectors)", 512110190592, "SD-99****HPA02", "X61110RL", "HEALTHY_HPA_LOCKED", 95, 1, "32.0 GB (Host Protected Area)", 1, 0, "3,810 Hours", "31°C", "92% Remaining", 1, 1, "purge-ata-secure", "GREEN")
-        ]
-        cursor.executemany("""
-            INSERT INTO devices (id, model, serial_number, storage_type, interface, capacity, capacity_bytes, masked_serial, firmware, health_status, health_score, hpa_detected, hpa_size, dco_detected, reallocated_sectors, power_on_hours, temperature, wear_level, crypto_erase_supported, ata_security_frozen, recommended_method, expected_outcome)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, seed_devices)
-
-    cursor.execute("SELECT COUNT(*) FROM certificates")
-    if cursor.fetchone()[0] == 0:
-        seed_certs = [
-            ("AEGIS-2026-980PRO-8F2B", "WIPE-REF-01", "Samsung SSD 980 PRO 1TB", "S6B0NF0R419823X", "NVMe PCIe 4.0 SSD", "1,000.2 GB", "Deep Hardware Purge (NIST SP 800-88 Crypto Erase)", "NVMe Cryptographic & Block Erase (SES=2)", "CLEANED (100% Zero Data)", "GREEN", "SAFE TO REUSE OR RESELL", "PASSED (100% Zero Confirmation)", "7e8b9f02c418a36d912", "a4f91d8e6c73b021a884f0923b7e12908c6a7e5f1d9c02b3e4f5a6b7c8d9e0f1", "3045022100a4f91d8e6c73b021a884f0923b7e129002208c6a7e5f1d9c02b3e4f5a6b7c8d9e0f1VALID", "https://wipex.app/verify?cert=AEGIS-2026-980PRO-8F2B", 0, "Authentic & Hardware-Bound. This certificate has not been altered or reused.", "2026-08-16 23:33:00 UTC"),
-            ("AEGIS-2026-BARRACUDA-3C1A", "WIPE-REF-02", "Seagate Barracuda 2TB 3.5\" HDD", "W9A2L88K901", "Magnetic HDD", "2,000.4 GB", "Standard Clear (NIST SP 800-88 Overwrite)", "ATA Enhanced Security Erase", "CLEANED (100% Zero Data)", "YELLOW", "CAUTION (AGED HARDWARE)", "PASSED (Zero Residual Data)", "4a1c89f30b91e772d11", "f01c891e3271ba67209148cba0129845ef92a83b1029c78491823901bcae8129", "3045022100f01c891e3271ba67209148cba01298450220ef92a83b1029c78491823901bcae8129VALID", "https://wipex.app/verify?cert=AEGIS-2026-BARRACUDA-3C1A", 0, "Authentic Wipe Certificate. Note: Drive has high operational lifetime (43,820 hrs); safe from data leak but component reliability is degraded.", "2026-08-15 14:12:00 UTC"),
-            ("AEGIS-2026-KINGSTON-RED-99", "WIPE-REF-03", "Kingston A400 480GB SATA SSD", "50026B7682910F4A", "SATA SSD", "480.1 GB", "Mandatory Mechanical Disintegration (<2mm)", "Chain-of-Custody Mechanical Shredding", "NOT CLEANED (48 Bad Sectors)", "RED", "MANDATORY PHYSICAL DESTRUCTION ORDER", "FAILED — 48 Bad Sectors Unwiped (Data Risk)", "98ab21034f81c990234", "9823ca019842bf901c82410a8837190248bf0912c01824761093847a192837bc", "30450221009823ca019842bf901c82410a88371902022048bf0912c01824761093847a192837bcVALID", "https://wipex.app/verify?cert=AEGIS-2026-KINGSTON-RED-99", 0, "Mandated Physical Destruction Manifest Issued. This media is prohibited from resale or circular reuse due to unerasable hardware sectors.", "2026-08-16 18:45:00 UTC"),
-            ("AEGIS-FORGED-FAKE-CERT-00", "WIPE-REF-04", "Samsung SSD 980 PRO 1TB [Forged Copy]", "S6B0NF0R419823X", "NVMe SSD", "1,000.2 GB", "Forged Certificate Attempt", "Forged Certificate Attempt", "FAILED INTEGRITY", "FRAUD", "🚨 FRAUD ALERT — SIGNATURE MISMATCH", "FAILED CRYPTOGRAPHIC INTEGRITY", "INVALID_NONCE_000", "0000000000000000000000000000000000000000000000000000000000000000", "INVALID_SIGNATURE", "https://wipex.app/verify?cert=AEGIS-FORGED-FAKE-CERT-00", 1, "SECURITY ALERT: The digital signature and hardware binding hash do not match the central ledger. This certificate has been modified, forged, or transferred to an unauthorized drive.", "2026-08-16 11:00:00 UTC")
-        ]
-        cursor.executemany("""
-            INSERT INTO certificates (certificate_id, wipe_id, device_model, serial_number, storage_type, capacity, standard, method_name, cleaned_status, trust_score, trust_score_label, audit_result, pre_wipe_nonce, sha256_digest, digital_signature, qr_payload, tamper_detected, verdict, issue_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, seed_certs)
+    # NO SEED DATA EVER — devices and certificates only come from real
+    # hardware probes and real wipe operations.
 
     conn.commit()
     conn.close()
