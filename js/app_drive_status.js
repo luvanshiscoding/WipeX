@@ -231,19 +231,6 @@
 
       this.renderFileExplorerList();
     };
-
-    /**
-     * Toggle explorer view mode (list/details)
-     */
-    window.app.toggleExplorerView = function(mode) {
-      document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-        btn.classList.remove('active');
-      });
-      if (event && event.target) {
-        const btn = event.target.closest('.view-toggle-btn');
-        if (btn) btn.classList.add('active');
-      }
-    };
   }
 
   // Start attaching

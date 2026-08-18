@@ -123,10 +123,15 @@ def run_independent_audit(wipe_id: str):
     record = database.get_wipe_record(wipe_id)
     if not record:
         raise HTTPException(status_code=404, detail="Wipe ID not found")
-    
     dev_id = record["device_id"]
+    from wipe_engine import WipeEngine
+    engine = WipeEngine()
+    dev = engine.resolve_device(dev_id)
+    device_path = dev.get("devicePath") if dev else None
+    capacity_bytes = dev.get("capacityBytes", 0) if dev else 0
+
     auditor = EntropyAuditor()
-    audit_res = auditor.audit_device(dev_id, sample_count=10000)
+    audit_res = auditor.audit_device(dev_id, sample_count=10000, device_path=device_path, capacity_bytes=capacity_bytes)
     return audit_res
 
 @app.post("/api/certificates/generate")

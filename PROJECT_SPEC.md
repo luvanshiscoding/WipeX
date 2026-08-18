@@ -189,3 +189,15 @@ The UI includes a built-in **Demo Mode** switch in the top header that allows in
 - **Fast-Forward Wipe**: Instant 1-second simulation of the 256-cluster sector canvas.
 - **Portal Query Chips**: Instant verification test samples (Valid, Caution, and Forged Fraudulent Certificates).
 - **Production Toggle**: Toggle OFF Demo Mode anytime to present a clean, production-ready enterprise interface.
+
+---
+
+## 🎨 Frontend Design Integrity & Production Rules
+
+To preserve formal presentation and production-grade polish:
+1. **No Informal Developer Notices**: Never inject ad-hoc debug messages, informal status lines, or explanatory developer text into the UI (e.g. avoid adding notes like "Sanitization Completed · Step 1–3 Locked").
+2. **Standard Native Controls**: Safety constraints (e.g. step lockouts, method selection before Step 3) must operate cleanly through standard button states (`disabled`), stepper indicator styling (`🔒`), or native toasts.
+3. **Pristine Prototype Layout**: Keep all headers, cards, badges, and action footers aligned, properly spaced, and formatted without awkward word wrapping or overflowing badges.
+4. **Clean, Decluttered Non-Technical Readability**: Present clear, intuitive metrics for regular and enterprise users. Avoid overwhelming users with raw low-level math or LBA sector counts in standard UI views; instead highlight practical values: Erasure Status, Speed (Instant/Fast), Security Level, and Verification Result.
+
+

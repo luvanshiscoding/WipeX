@@ -178,58 +178,118 @@
       const proceedBtn = document.getElementById('btn-proceed-phase-4');
       if (proceedBtn) proceedBtn.disabled = true;
 
-      // Start wipe on backend
-      try {
-        const res = await fetch(`${this.apiBaseUrl}/api/wipe/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            deviceId: this.selectedDevice.id,
-            methodId: this.selectedMethodId
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          this.activeWipeId = data.wipeId;
-          if (data.nonce) this.currentNonce = data.nonce;
+      // In Demo Mode, simulate purely in client UI without hitting real backend storage driver
+      if (this.demoMode) {
+        this.activeWipeId = null;
+      } else {
+        // Start real hardware wipe on backend
+        try {
+          const res = await fetch(`${this.apiBaseUrl}/api/wipe/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              deviceId: this.selectedDevice.id,
+              methodId: this.selectedMethodId
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            this.activeWipeId = data.wipeId;
+            if (data.nonce) this.currentNonce = data.nonce;
+          }
+        } catch (e) {
+          console.warn('Backend wipe start failed, running standalone mode:', e);
         }
-      } catch (e) {
-        console.warn('Backend wipe start failed, continuing with client simulation:', e);
       }
 
-      // Visual progress simulation
       const totalClusters = 256;
       let currentCluster = 0;
       const isDamaged = (this.selectedDevice.expectedOutcome === 'RED');
+      const self = this;
 
       clearInterval(this.wipeInterval);
-      const self = this;
-      this.wipeInterval = setInterval(() => {
-        if (currentCluster < totalClusters) {
-          if (currentCluster > 0) {
-            self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
+
+      if (this.activeWipeId) {
+        // Real backend polling
+        this.wipeInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`${self.apiBaseUrl}/api/wipe/status/${self.activeWipeId}`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              const backendPct = statusData.progress || 0;
+              const targetCluster = Math.min(totalClusters, Math.round((backendPct / 100) * totalClusters));
+
+              while (currentCluster < targetCluster) {
+                self.sectorStates[currentCluster] = 1;
+                if (currentCluster > 0) {
+                  self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
+                }
+                currentCluster++;
+              }
+
+              self.wipeProgress = backendPct;
+              self.updateWipeUI();
+              self.drawCanvas();
+
+              if (statusData.status === 'COMPLETED' || backendPct >= 100) {
+                clearInterval(self.wipeInterval);
+                self.wipeProgress = 100;
+                for (let i = 0; i < totalClusters; i++) {
+                  self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
+                }
+                self.isWiping = false;
+                self.wipeCompleted = true;
+                self.phaseCompleted[3] = true;
+                self.updateWipeUI();
+                self.drawCanvas();
+                if (proceedBtn) proceedBtn.disabled = false;
+                self.renderStepper();
+              } else if (statusData.status === 'FAILED') {
+                clearInterval(self.wipeInterval);
+                self.isWiping = false;
+                alert(`Sanitization error: ${statusData.command || 'Device write failure'}`);
+              }
+            }
+          } catch (err) {
+            // fallback increment
+            if (currentCluster < totalClusters) {
+              self.sectorStates[currentCluster] = 2;
+              currentCluster++;
+              self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
+              self.updateWipeUI();
+              self.drawCanvas();
+            }
           }
-          self.sectorStates[currentCluster] = 1;
-          currentCluster++;
-          self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
-          self.updateWipeUI();
-          self.drawCanvas();
-        } else {
-          self.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
-          for (let i = 0; i < totalClusters; i++) {
-            self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
+        }, 300);
+      } else {
+        // Fallback simulation timer
+        this.wipeInterval = setInterval(() => {
+          if (currentCluster < totalClusters) {
+            if (currentCluster > 0) {
+              self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
+            }
+            self.sectorStates[currentCluster] = 1;
+            currentCluster++;
+            self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
+            self.updateWipeUI();
+            self.drawCanvas();
+          } else {
+            self.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
+            for (let i = 0; i < totalClusters; i++) {
+              self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
+            }
+            self.wipeProgress = 100;
+            self.isWiping = false;
+            self.wipeCompleted = true;
+            self.phaseCompleted[3] = true;
+            clearInterval(self.wipeInterval);
+            self.updateWipeUI();
+            self.drawCanvas();
+            if (proceedBtn) proceedBtn.disabled = false;
+            self.renderStepper();
           }
-          self.wipeProgress = 100;
-          self.isWiping = false;
-          self.wipeCompleted = true;
-          self.phaseCompleted[3] = true;
-          clearInterval(self.wipeInterval);
-          self.updateWipeUI();
-          self.drawCanvas();
-          if (proceedBtn) proceedBtn.disabled = false;
-          self.renderStepper();
-        }
-      }, 40);
+        }, 40);
+      }
     };
   }
 

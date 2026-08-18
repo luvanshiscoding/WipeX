@@ -940,18 +940,10 @@ body:not(.demo-mode-active) .demo-only-feature {
 
 /* Explorer Main */
 .explorer-main {
-  display: flex;
-  min-height: 380px;
-  max-height: 480px;
-}
-
-.explorer-sidebar {
-  width: 210px;
-  background: rgba(0, 0, 0, 0.25);
-  border-right: 1px solid var(--border-subtle);
-  padding: 12px 0;
-  overflow-y: auto;
-  flex-shrink: 0;
+  display: block;
+  min-height: 180px;
+  max-height: 300px;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .sidebar-section {
@@ -1662,6 +1654,26 @@ body:not(.demo-mode-active) .demo-only-feature {
 .cert-timestamp {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.cert-tamper-pill {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--cyan-neon);
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid var(--cyan-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-weight: 700;
+}
+
+.cert-lbl {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  width: 44%;
 }
 
 .cert-status-banner {
