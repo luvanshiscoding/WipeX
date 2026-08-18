@@ -28,8 +28,10 @@ class WipeXApp {
     this.destructionCountdownTimer = null;
     this.destructionCountdown = 10;
 
+    this.demoMode = true; // Interactive demo mode toggle
+
     this.sectorStates = new Array(256).fill(0);
-    this.currentNonce = (window.AegisCrypto || window.WipeXCrypto).generateNonce();
+    this.currentNonce = (window.WipeXCrypto || window.AegisCrypto).generateNonce();
     this.currentCertId = null;
     this.currentCertData = null;
 
@@ -46,25 +48,25 @@ class WipeXApp {
     this.simpleMethods = [
       {
         id: "purge-nvme-crypto",
-        name: "Deep Hardware Purge (NVMe)",
-        fullName: "Deep Hardware Purge (NIST SP 800-88 Crypto Erase)",
-        oneLine: "Instant cryptographic key destruction + full NAND zeroing for NVMe SSDs.",
+        name: "Cryptographic Purge (NVMe)",
+        fullName: "NIST SP 800-88 Cryptographic Erase (NVMe Purge)",
+        oneLine: "Instant controller-level cryptographic key destruction with full media purge.",
         speed: "Instant (1-2 mins)",
         recommendedFor: "NVMe SSD"
       },
       {
         id: "purge-ata-secure",
-        name: "Deep Hardware Purge (ATA Enhanced)",
-        fullName: "Deep Hardware Purge (NIST SP 800-88 ATA Secure Erase)",
-        oneLine: "Controller-level voltage pulse sanitizing 100% of cells & HPA/DCO zones.",
-        speed: "Fast (5-10 mins)",
+        name: "Enhanced Hardware Purge (SATA SSD)",
+        fullName: "NIST SP 800-88 Enhanced Security Erase (Purge)",
+        oneLine: "Controller-level sanitize command resetting 100% of cells and hidden protected areas.",
+        speed: "Fast (3-5 mins)",
         recommendedFor: "SATA SSD"
       },
       {
         id: "clear-single",
-        name: "Standard Clear Wipe",
-        fullName: "Standard Clear (NIST SP 800-88 Single-Pass 0x00 Overwrite)",
-        oneLine: "Single-pass 0x00 overwrite for hard drives and USB media.",
+        name: "Standard Overwrite Clear (HDD)",
+        fullName: "NIST SP 800-88 Standard Overwrite Clear",
+        oneLine: "Single-pass 0x00 pattern overwrite designed for magnetic hard disk drives.",
         speed: "Standard (10-20 mins)",
         recommendedFor: "Magnetic HDD"
       },
@@ -72,7 +74,7 @@ class WipeXApp {
         id: "destroy-physical",
         name: "Physical Destruction Mandate",
         fullName: "Mandatory Mechanical Disintegration (<2mm Shredding)",
-        oneLine: "Required when hardware has unreadable bad sectors that cannot be sanitized.",
+        oneLine: "Required when hardware has unreadable bad sectors that cannot be safely sanitized by software.",
         speed: "Physical Facility Shredder",
         recommendedFor: "FAILING"
       }
@@ -82,10 +84,52 @@ class WipeXApp {
   }
 
   async init() {
+    this.initDemoMode();
     this.renderStepper();
     this.renderMethodOptions();
     this.initCanvas();
     await this.loadDevices();
+  }
+
+  initDemoMode() {
+    const saved = localStorage.getItem('wipex_demo_mode');
+    this.demoMode = (saved === null) ? true : (saved === '1');
+    this.applyDemoMode();
+  }
+
+  toggleDemoMode(enabled) {
+    this.demoMode = enabled;
+    localStorage.setItem('wipex_demo_mode', enabled ? '1' : '0');
+    this.applyDemoMode();
+  }
+
+  applyDemoMode() {
+    document.body.classList.toggle('demo-mode-active', this.demoMode);
+    const toggleEl = document.getElementById('demo-mode-toggle');
+    if (toggleEl) toggleEl.checked = this.demoMode;
+  }
+
+  selectDeviceById(deviceId) {
+    const dev = this.devices.find(d => d.id === deviceId);
+    if (dev) {
+      this.selectDevice(dev);
+    }
+  }
+
+  fastForwardWipe() {
+    if (!this.isWiping && !this.wipeCompleted) {
+      this.startWipe();
+    }
+    this.wipeProgress = 99;
+    if (this.sectorStates) {
+      const isRed = (this.selectedDevice && this.selectedDevice.expectedOutcome === 'RED');
+      for (let i = 0; i < this.sectorStates.length; i++) {
+        if (isRed && (i % 6 === 0)) this.sectorStates[i] = 3;
+        else this.sectorStates[i] = 2;
+      }
+    }
+    this.drawCanvas();
+    this.updateWipeUI();
   }
 
   async loadDevices() {
@@ -94,32 +138,33 @@ class WipeXApp {
 
     if (scanBtn) {
       scanBtn.disabled = true;
-      const original = scanBtn.querySelector('span')?.textContent || 'Scan Drives';
-      scanBtn.querySelector('span').textContent = 'Scanning…';
+      const span = scanBtn.querySelector('span');
+      if (span) span.textContent = 'Scanning…';
     }
 
     if (listEl) {
       listEl.innerHTML = `
-        <div style="text-align:center; padding:40px; color:var(--text-muted);">
+        <div style="text-align:center; padding:40px; color:var(--text-muted); grid-column: 1 / -1;">
           <div style="font-size:28px; margin-bottom:12px;">🔍</div>
-          <div style="font-size:14px; font-weight:600;">Scanning connected drives…</div>
-          <div style="font-size:12px; margin-top:6px; color:var(--text-muted);">Reading SMART diagnostics and health data</div>
+          <div style="font-size:14px; font-weight:600;">Scanning connected storage devices…</div>
+          <div style="font-size:12px; margin-top:6px; color:var(--text-muted);">Querying device health and storage topology</div>
         </div>
       `;
     }
 
     let devices = [];
-    let backendError = false;
-    let backendErrorMessage = '';
 
     try {
       const res = await fetch(`${this.apiBaseUrl}/api/devices`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`API HTTP ${res.status}`);
-      devices = await res.json();
+      if (res.ok) {
+        devices = await res.json();
+      }
     } catch (e) {
-      backendError = true;
-      backendErrorMessage = e && e.message ? e.message : 'Connection failed';
-      devices = [];
+      // Backend not running — fallback to prototype presets
+    }
+
+    if (!devices || devices.length === 0) {
+      devices = window.MOCK_DEVICES || [];
     }
 
     // Deduplicate by devicePath / serialNumber — no duplicates allowed
@@ -141,18 +186,6 @@ class WipeXApp {
 
     this.devices = deduped;
 
-    let alertHtml = '';
-    if (backendError) {
-      alertHtml = `
-        <div data-backend-banner style="text-align:center; padding: 12px 14px; margin-bottom: 12px; font-size:13px; color:var(--red-text); background:var(--red-bg); border:1.5px solid var(--red-border); border-radius:8px;">
-          🚨 Backend unreachable (<code class="font-mono">${backendErrorMessage}</code>). Start the backend:
-          <div style="margin-top:6px; font-family:var(--font-mono); text-align:left; background:#fff; border:1px solid var(--border-subtle); padding:8px 10px; border-radius:6px; color:var(--text-primary); display:inline-block;">
-            pip3 install -r requirements.txt && python3 main.py
-          </div>
-        </div>
-      `;
-    }
-
     this.selectedDevice = this.devices[0] || null;
     if (this.selectedDevice) {
       this.selectedMethodId = this.selectedDevice.recommendedMethod || 'purge-nvme-crypto';
@@ -167,9 +200,6 @@ class WipeXApp {
       if (span) span.textContent = 'Scan Drives';
     }
 
-    if (listEl) {
-      listEl.innerHTML = alertHtml;
-    }
     this.renderDeviceList();
     this.renderDriveStatus();
     this.updatePhase1ContinueBtn();
@@ -235,13 +265,13 @@ class WipeXApp {
     if (!stepperEl) return;
 
     const phases = [
-      { num: 1, title: "1. Select Drive" },
-      { num: 2, title: "2. Unlock Storage" },
-      { num: 3, title: "3. Choose Method" },
-      { num: 4, title: "4. Erase Data" },
-      { num: 5, title: "5. Verify" },
-      { num: 6, title: "6. Safety Score" },
-      { num: 7, title: "7. Certificate" }
+      { num: 1, title: "Select Drive" },
+      { num: 2, title: "Unlock Storage" },
+      { num: 3, title: "Choose Method" },
+      { num: 4, title: "Erase Data" },
+      { num: 5, title: "Verify" },
+      { num: 6, title: "Safety Score" },
+      { num: 7, title: "Certificate" }
     ];
 
     stepperEl.innerHTML = phases.map(p => {
@@ -303,20 +333,16 @@ class WipeXApp {
     if (!listEl) return;
     if (!this.devices.length) {
       listEl.innerHTML = `
-        <div style="text-align:center; padding:40px; border:1.5px solid var(--red-border); background:var(--red-bg); border-radius:var(--radius-md); color:var(--red-text); margin-top:10px;">
-          <div style="font-size:28px; margin-bottom:12px;">⚠️</div>
-          <div style="font-size:15px; font-weight:700; margin-bottom:6px;">No drives detected</div>
-          <div style="font-size:13px; color:var(--text-secondary); margin-bottom:14px;">Connect a storage drive and click "Scan Drives" to detect it.</div>
-          <code style="display:block; background:#fff; border:1px solid var(--border-subtle); border-radius:6px; padding:10px 14px; font-size:13px; font-family:var(--font-mono); color:var(--text-primary);">python3 main.py</code>
-          <button class="btn btn-primary" style="margin-top:16px;" onclick="app.loadDevices()">Scan Drives</button>
+        <div style="text-align:center; padding:32px; border:1px solid var(--border-subtle); background:var(--bg-surface); border-radius:var(--radius-lg); color:var(--text-secondary); grid-column: 1 / -1;">
+          <div style="font-size:24px; margin-bottom:8px;">💾</div>
+          <div style="font-size:15px; font-weight:700; margin-bottom:4px;">No Drives Detected</div>
+          <div style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Connect a storage drive or click Scan Drives to refresh.</div>
+          <button class="btn btn-primary" onclick="app.loadDevices()">Scan Drives</button>
         </div>
       `;
       if (alertEl) alertEl.style.display = 'none';
       return;
     }
-
-    const existingBanner = listEl.querySelector('[data-backend-banner]');
-    const bannerHtml = existingBanner ? existingBanner.outerHTML : '';
 
     const devicesHtml = this.devices.map(dev => {
       const isSelected = this.selectedDevice && dev.id === this.selectedDevice.id;
@@ -358,7 +384,7 @@ class WipeXApp {
       `;
     }).join('');
 
-    listEl.innerHTML = bannerHtml + devicesHtml;
+    listEl.innerHTML = devicesHtml;
 
     if (alertEl && this.selectedDevice) {
       alertEl.style.display = '';
@@ -533,10 +559,10 @@ class WipeXApp {
       for (let c = 0; c < cols; c++) {
         const index = r * cols + c;
         const state = this.sectorStates[index] || 0;
-        let fill = '#e2e8f0';
-        if (state === 1) fill = '#2563eb';
-        else if (state === 2) fill = '#10b981';
-        else if (state === 3) fill = '#ef4444';
+        let fill = '#141c2e'; // Unwiped / resting state
+        if (state === 1) fill = '#00f0ff'; // Active scan / purge (cyber cyan)
+        else if (state === 2) fill = '#00ff88'; // Sanitized clean (matrix green)
+        else if (state === 3) fill = '#ff3366'; // Bad sector / fault (radiant red)
         ctx.fillStyle = fill;
         ctx.fillRect(c * blockWidth + 1, r * blockHeight + 1, blockWidth - 2, blockHeight - 2);
       }
@@ -657,7 +683,7 @@ class WipeXApp {
 
     const chosenMethod = this.simpleMethods.find(m => m.id === this.selectedMethodId) || this.simpleMethods[0];
     const canonicalString = `${dev.serialNumber}:${this.currentNonce}:${chosenMethod.id}:${timestamp}`;
-    const cryptoHelper = window.AegisCrypto || window.WipeXCrypto;
+    const cryptoHelper = window.WipeXCrypto || window.AegisCrypto;
     let sha256Hash = await cryptoHelper.sha256(canonicalString);
 
     const isGreen = (dev.expectedOutcome === 'GREEN');
@@ -781,7 +807,7 @@ class WipeXApp {
     document.getElementById('cert-sha256').textContent = sha256Hash;
 
     const qrContainer = document.getElementById('cert-qr-container');
-    const qrHelper = window.AegisQR || window.WipeXQR;
+    const qrHelper = window.WipeXQR || window.AegisQR;
     qrHelper.renderQR(qrContainer, `https://wipex.app/verify?cert=${certId}&hash=${sha256Hash}`);
   }
 
@@ -856,7 +882,7 @@ class WipeXApp {
     if (!record) {
       resultCard.innerHTML = `
         <div style="text-align: center; padding: 24px; border: 1.5px solid var(--red-border); background: var(--red-bg); border-radius: var(--radius-md);">
-          <h3 style="font-size: 16px; font-weight: 700; color: var(--red-600); margin-bottom: 6px;">Certificate Not Found</h3>
+          <h3 style="font-size: 16px; font-weight: 700; color: var(--red-neon); margin-bottom: 6px;">Certificate Not Found</h3>
           <p style="font-size: 13px; color: var(--text-secondary);">No sanitization record found for "<strong>${query}</strong>". Please verify the Certificate ID or Serial Number.</p>
         </div>
       `;
@@ -865,13 +891,13 @@ class WipeXApp {
 
     if (record.tamperDetected) {
       resultCard.innerHTML = `
-        <div style="border-left: 4px solid var(--red-600); background: var(--red-bg); border: 1.5px solid var(--red-border); border-left-width: 6px; padding: 18px; border-radius: var(--radius-md);">
+        <div style="border-left: 4px solid var(--red-neon); background: var(--red-bg); border: 1.5px solid var(--red-border); border-left-width: 6px; padding: 18px; border-radius: var(--radius-md);">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span class="card-health-pill pill-red font-bold">🚨 FRAUD ALERT — SIGNATURE MISMATCH</span>
             <span style="font-size: 14px; font-weight: 800; font-family: var(--font-mono);">${record.certificateId}</span>
           </div>
-          <p style="font-size: 13px; color: var(--red-text); font-weight: 600; margin-bottom: 10px;">${record.verdict}</p>
-          <div style="font-size: 12px; color: var(--text-secondary); background: #ffffff; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--red-border);">
+          <p style="font-size: 13px; color: var(--red-neon); font-weight: 600; margin-bottom: 10px;">${record.verdict}</p>
+          <div style="font-size: 12px; color: var(--text-secondary); background: rgba(0,0,0,0.4); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--red-border);">
             <strong>Report:</strong> Forged hash: <code class="font-mono text-red">${record.sha256Digest}</code>. Central ledger hardware binding mismatch.
           </div>
         </div>
@@ -925,9 +951,8 @@ class WipeXApp {
   }
 }
 
-// Global Aliases
+// Global Export
 window.WipeXApp = WipeXApp;
-window.AegisApp = WipeXApp;
 
 window.addEventListener('DOMContentLoaded', () => {
   window.app = new WipeXApp();

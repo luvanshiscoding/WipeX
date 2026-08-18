@@ -8,7 +8,7 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -23,21 +23,37 @@
       </div>
       <div class="brand-text">
         <span class="brand-name">WipeX</span>
-        <span class="brand-sub">Zero-Trust Data Erasure & Drive Certification</span>
+        <span class="brand-sub">Zero-Trust Data Erasure & Compliance Platform</span>
       </div>
     </div>
 
-    <!-- Navigation -->
-    <nav class="header-nav">
-      <button class="nav-tab active" id="nav-workflow-btn" onclick="app.switchView('workflow')">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        <span>Wipe a Drive</span>
-      </button>
-      <button class="nav-tab" id="nav-verify-btn" onclick="app.switchView('portal')">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        <span>Verify Certificate</span>
-      </button>
-    </nav>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <!-- Demo Mode Toggle -->
+      <div class="demo-toggle-container no-print" title="Toggle interactive test presets and demo tools">
+        <span class="demo-toggle-label">Demo Mode</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="demo-mode-toggle" checked onchange="app.toggleDemoMode(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="compliance-badge no-print" style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--emerald-text); background: var(--emerald-50); border: 1px solid var(--emerald-border); padding: 4px 12px; border-radius: var(--radius-pill);">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--emerald-600);"></span>
+        <span>NIST SP 800-88 Compliant</span>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="header-nav">
+        <button class="nav-tab active" id="nav-workflow-btn" onclick="app.switchView('workflow')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Wipe a Drive</span>
+        </button>
+        <button class="nav-tab" id="nav-verify-btn" onclick="app.switchView('portal')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span>Verify Certificate</span>
+        </button>
+      </nav>
+    </div>
   </header>
 
   <!-- Main Container -->
@@ -61,13 +77,28 @@
           <div class="phase-header-block">
             <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
               <div>
-                <h2 class="phase-title">1. Select the Drive to Wipe</h2>
-                <p class="phase-desc">Choose a connected hard drive or SSD to begin.</p>
+                <h2 class="phase-title">Select Storage Drive</h2>
+                <p class="phase-desc">Choose a connected hard drive or SSD to begin sanitization.</p>
               </div>
               <button class="btn btn-secondary btn-scan" id="btn-scan-drives" onclick="app.loadDevices()">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
                 <span>Scan Drives</span>
               </button>
+            </div>
+          </div>
+
+          <!-- Demo Scenario Presets Bar (Visible in Demo Mode) -->
+          <div class="demo-scenario-bar demo-only-feature">
+            <div class="demo-bar-title">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <span>Demo Test Presets:</span>
+            </div>
+            <div class="demo-chips">
+              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-nvme-samsung-980')">🟢 Samsung 980 NVMe (Clean)</button>
+              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-sandisk-hpa-hidden')">🔒 SanDisk 512GB (Hidden HPA)</button>
+              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-hdd-seagate-barracuda')">🟡 Seagate 2TB (Aging Media)</button>
+              <button type="button" class="btn-chip text-red" onclick="app.selectDeviceById('dev-ssd-kingston-damaged')">🔴 Kingston 480GB (Damaged/Shred)</button>
+              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-crucial-clean-256')">⚡ Crucial 256GB (Pre-Sanitized)</button>
             </div>
           </div>
 
@@ -211,7 +242,7 @@
         <!-- STEP 2: UNLOCK HIDDEN STORAGE -->
         <div id="phase-2-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">2. Prepare Drive & Unlock Hidden Areas</h2>
+            <h2 class="phase-title">Prepare Drive & Unlock Protected Areas</h2>
             <p class="phase-desc">We unlock protected and hidden storage areas to make sure all parts of the drive are wiped.</p>
           </div>
 
@@ -246,7 +277,7 @@
         <!-- STEP 3: SANITIZATION METHODS (ONE-LINE) -->
         <div id="phase-3-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">3. Choose Sanitization Method</h2>
+            <h2 class="phase-title">Choose Sanitization Method</h2>
             <p class="phase-desc">Select an erasure method. The recommended method for your drive is already selected.</p>
           </div>
 
@@ -266,7 +297,7 @@
         <!-- STEP 4: ACTIVE WIPE PROGRESS -->
         <div id="phase-4-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">4. Securely Erasing Drive...</h2>
+            <h2 class="phase-title">Securely Erasing Drive...</h2>
             <p class="phase-desc">Please wait while your data is being permanently deleted.</p>
           </div>
 
@@ -295,6 +326,13 @@
               <canvas id="sector-canvas" width="600" height="160"></canvas>
             </div>
 
+            <!-- Demo Fast-Forward Button (Visible in Demo Mode) -->
+            <div class="demo-fast-forward demo-only-feature" style="margin-top: 16px; display: flex; justify-content: center;">
+              <button type="button" class="btn btn-chip" onclick="app.fastForwardWipe()">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
+                <span>Fast-Forward Wipe (Instant Demo)</span>
+              </button>
+            </div>
 
           </div>
 
@@ -309,7 +347,7 @@
         <!-- STEP 5: INDEPENDENT VERIFICATION CHECK -->
         <div id="phase-5-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">5. Independent Verification Check</h2>
+            <h2 class="phase-title">Independent Verification Check</h2>
             <p class="phase-desc">An independent check reads the drive to confirm zero data remains.</p>
           </div>
 
@@ -340,7 +378,7 @@
         <!-- STEP 6: SAFETY SCORE (TRAFFIC LIGHT) -->
         <div id="phase-6-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">6. Drive Safety Result</h2>
+            <h2 class="phase-title">Drive Safety Assessment</h2>
             <p class="phase-desc">Final recommendation for this storage drive.</p>
           </div>
 
@@ -367,7 +405,7 @@
         <!-- STEP 7: HIGH-LEGIBILITY OFFICIAL CERTIFICATE -->
         <div id="phase-7-panel" class="phase-screen">
           <div class="phase-header-block no-print">
-            <h2 class="phase-title">7. Official Certificate of Sanitization</h2>
+            <h2 class="phase-title">Official Certificate of Sanitization</h2>
             <p class="phase-desc">This certificate proves that this specific drive was securely wiped. It includes the sanitization method, clean status, and a verification QR code.</p>
           </div>
 
@@ -390,7 +428,7 @@
 
                 <div class="cert-meta-id">
                   <div class="cert-id-label">CERTIFICATE ID</div>
-                  <div class="cert-id-val font-mono" id="cert-id-val">AEGIS-2026-980PRO-8F2B</div>
+                  <div class="cert-id-val font-mono" id="cert-id-val">WIPEX-2026-980PRO-8F2B</div>
                   <div class="cert-timestamp" id="cert-timestamp-val">2026-08-16 23:33:00</div>
                 </div>
               </div>
@@ -482,15 +520,16 @@
         <div class="portal-search-box">
           <div class="search-input-group">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="portal-search-input" placeholder="Enter Certificate ID or Drive Serial..." value="AEGIS-2026-980PRO-8F2B" onkeydown="if(event.key==='Enter') app.verifyLookup()">
+            <input type="text" id="portal-search-input" placeholder="Enter Certificate ID or Drive Serial Number (e.g. WIPEX-2026-980PRO-8F2B)..." value="" onkeydown="if(event.key==='Enter') app.verifyLookup()">
             <button class="btn btn-primary" onclick="app.verifyLookup()">Check</button>
           </div>
 
-          <div class="sample-queries">
-            <span class="sq-label">Test Samples:</span>
-            <button class="btn-chip" onclick="app.fillPortalSearch('AEGIS-2026-980PRO-8F2B')">🟢 Verified NVMe Cert</button>
-            <button class="btn-chip" onclick="app.fillPortalSearch('AEGIS-2026-BARRACUDA-3C1A')">🟡 Caution Cert</button>
-            <button class="btn-chip text-red" onclick="app.fillPortalSearch('AEGIS-FORGED-FAKE-CERT-00')">⚠️ Test Fake Certificate</button>
+          <!-- Demo Test Queries Bar (Visible in Demo Mode) -->
+          <div class="sample-queries demo-only-feature">
+            <span class="sq-label">Demo Test Samples:</span>
+            <button class="btn-chip" onclick="app.fillPortalSearch('WIPEX-2026-980PRO-8F2B')">🟢 Verified NVMe Cert</button>
+            <button class="btn-chip" onclick="app.fillPortalSearch('WIPEX-2026-BARRACUDA-3C1A')">🟡 Caution Cert</button>
+            <button class="btn-chip text-red" onclick="app.fillPortalSearch('WIPEX-FORGED-FAKE-CERT-00')">⚠️ Test Fake Certificate</button>
           </div>
         </div>
 

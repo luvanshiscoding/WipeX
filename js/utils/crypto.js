@@ -1,9 +1,9 @@
 /**
- * Aegis Wipe - Cryptographic Binding & Integrity Engine
+ * WipeX - Cryptographic Binding & Integrity Engine
  * Implements genuine SHA-256 digests, nonce creation, and digital signature verification.
  */
 
-window.AegisCrypto = {
+window.WipeXCrypto = {
   /**
    * Generates a cryptographically secure random hexadecimal nonce (128-bit)
    */
@@ -64,5 +64,3 @@ window.AegisCrypto = {
     ].join('|');
   }
 };
-
-window.WipeXCrypto = window.AegisCrypto;

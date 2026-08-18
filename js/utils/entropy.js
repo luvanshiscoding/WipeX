@@ -1,9 +1,9 @@
 /**
- * Aegis Wipe - Mathematical Shannon Entropy & Raw Sector Analyzer
+ * WipeX - Mathematical Shannon Entropy & Raw Sector Analyzer
  * Computes exact statistical randomness across 512-byte / 4096-byte LBA sectors.
  */
 
-window.AegisEntropy = {
+window.WipeXEntropy = {
   /**
    * Calculates Shannon Entropy H(X) in bits per byte [0.000000 to 8.000000]
    * @param {Uint8Array} byteArray 
@@ -23,11 +23,11 @@ window.AegisEntropy = {
     for (let i = 0; i < 256; i++) {
       if (frequencies[i] > 0) {
         const p = frequencies[i] / len;
-        entropy -= p * (Math.log(p) / Math.LN2);
+        entropy -= p * Math.log2(p);
       }
     }
 
-    return entropy;
+    return parseFloat(entropy.toFixed(6));
   },
 
   /**
@@ -54,13 +54,10 @@ window.AegisEntropy = {
   formatHexDump: function (byteArray, startingOffset = 0) {
     let outputLines = [];
     const bytesPerLine = 16;
-    
-    // Display up to 128 bytes to keep UI snappy and legible
     const displayLen = Math.min(byteArray.length, 128);
 
     for (let i = 0; i < displayLen; i += bytesPerLine) {
       const offsetHex = (startingOffset + i).toString(16).padStart(8, '0');
-      
       let hexPart = [];
       let asciiPart = [];
 
@@ -68,7 +65,6 @@ window.AegisEntropy = {
         if (i + j < displayLen) {
           const b = byteArray[i + j];
           hexPart.push(b.toString(16).padStart(2, '0'));
-          // Printable ASCII or dot
           asciiPart.push(b >= 32 && b <= 126 ? String.fromCharCode(b) : '.');
         } else {
           hexPart.push('  ');
@@ -76,7 +72,6 @@ window.AegisEntropy = {
         }
       }
 
-      // Group into 8-byte chunks
       const formattedHex = hexPart.slice(0, 8).join(' ') + '  ' + hexPart.slice(8, 16).join(' ');
       const formattedAscii = asciiPart.join('');
 
@@ -96,5 +91,3 @@ window.AegisEntropy = {
     return outputLines.join('');
   }
 };
-
-window.WipeXEntropy = window.AegisEntropy;

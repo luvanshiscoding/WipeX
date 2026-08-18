@@ -171,7 +171,7 @@
       this.phaseCompleted[6] = false;
       this.renderStepper();
 
-      const cryptoHelper = window.AegisCrypto || window.WipeXCrypto;
+      const cryptoHelper = window.WipeXCrypto;
       this.currentNonce = cryptoHelper.generateNonce();
 
       const proceedBtn = document.getElementById('btn-proceed-phase-5');

@@ -1,5 +1,5 @@
 /**
- * Aegis Wipe - NIST SP 800-88 Rev. 1 & Sanitization Standards Repository
+ * WipeX - NIST SP 800-88 Rev. 1 & Sanitization Standards Repository
  */
 
 window.NIST_STANDARDS = [
@@ -27,7 +27,7 @@ window.NIST_STANDARDS = [
     passes: 1,
     estimatedSpeed: "180 - 250 MB/s",
     securityLevel: "HIGH (Corporate IT & Government)",
-    hardwareCommand: "hdparm --user-master u --security-erase-enhanced p aegiswipe /dev/sdX",
+    hardwareCommand: "hdparm --user-master u --security-erase-enhanced p wipex /dev/sdX",
     unfreezesHpa: true,
     residualRisk: "Zero (Verified via Independent Dual-Auditor)"
   },

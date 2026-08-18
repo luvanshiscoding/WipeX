@@ -1,11 +1,11 @@
 /**
- * Aegis Wipe - Public Certificate & Ledger Repository
+ * WipeX - Public Certificate & Ledger Repository
  * Central database records ensuring verifiable chain-of-custody and tamper detection.
  */
 
 window.CERTIFICATE_STORE = {
-  "AEGIS-2026-980PRO-8F2B": {
-    certificateId: "AEGIS-2026-980PRO-8F2B",
+  "WIPEX-2026-980PRO-8F2B": {
+    certificateId: "WIPEX-2026-980PRO-8F2B",
     status: "VALID",
     trustScore: "GREEN",
     trustScoreLabel: "GREEN — SAFE FOR REUSE",
@@ -23,13 +23,13 @@ window.CERTIFICATE_STORE = {
     preWipeNonce: "7e8b9f02c418a36d912",
     sha256Digest: "a4f91d8e6c73b021a884f0923b7e12908c6a7e5f1d9c02b3e4f5a6b7c8d9e0f1",
     signatureStatus: "VALID_ECDSA_P256",
-    organization: "Aegis Enterprise Certified Node #04",
+    organization: "WipeX Enterprise Certified Node #04",
     auditorId: "AUD-SEC-9082",
     tamperDetected: false,
     verdict: "Authentic & Hardware-Bound. This certificate has not been altered or reused."
   },
-  "AEGIS-2026-BARRACUDA-3C1A": {
-    certificateId: "AEGIS-2026-BARRACUDA-3C1A",
+  "WIPEX-2026-BARRACUDA-3C1A": {
+    certificateId: "WIPEX-2026-BARRACUDA-3C1A",
     status: "VALID_CAUTION",
     trustScore: "YELLOW",
     trustScoreLabel: "YELLOW — CAUTION (RESALE NOT RECOMMENDED)",
@@ -52,8 +52,8 @@ window.CERTIFICATE_STORE = {
     tamperDetected: false,
     verdict: "Authentic Wipe Certificate. Note: Drive has high operational lifetime (43,820 hrs); safe from data leak but component reliability is degraded."
   },
-  "AEGIS-2026-KINGSTON-RED-99": {
-    certificateId: "AEGIS-2026-KINGSTON-RED-99",
+  "WIPEX-2026-KINGSTON-RED-99": {
+    certificateId: "WIPEX-2026-KINGSTON-RED-99",
     status: "DESTROYED_MANDATE",
     trustScore: "RED",
     trustScoreLabel: "RED — MANDATORY PHYSICAL DESTRUCTION ORDER",
@@ -76,8 +76,8 @@ window.CERTIFICATE_STORE = {
     tamperDetected: false,
     verdict: "Mandated Physical Destruction Manifest Issued. This media is prohibited from resale or circular reuse due to unerasable hardware sectors."
   },
-  "AEGIS-FORGED-FAKE-CERT-00": {
-    certificateId: "AEGIS-FORGED-FAKE-CERT-00",
+  "WIPEX-FORGED-FAKE-CERT-00": {
+    certificateId: "WIPEX-FORGED-FAKE-CERT-00",
     status: "FORGED_TAMPERED",
     trustScore: "FRAUD",
     trustScoreLabel: "🚨 FRAUD ALERT — CRYPTOGRAPHIC SIGNATURE MISMATCH",
