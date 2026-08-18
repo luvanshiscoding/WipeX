@@ -16,7 +16,23 @@
     window.app.fileTree = null;
 
     /**
-     * Builds a hierarchical tree structure from flat file list
+     * File type icon helper
+     */
+    window.app.getFileIcon = function(fileName) {
+      if (!fileName) return '📄';
+      const ext = fileName.split('.').pop().toLowerCase();
+      if (['mpg', 'mpeg', 'mp4', 'mkv', 'mov', 'avi', 'wmv'].includes(ext)) return '🎬';
+      if (['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg'].includes(ext)) return '🎵';
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(ext)) return '🖼️';
+      if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) return '📦';
+      if (['pdf', 'doc', 'docx', 'txt', 'rtf', 'pages'].includes(ext)) return '📑';
+      if (['html', 'htm', 'js', 'py', 'json', 'css', 'ts'].includes(ext)) return '💻';
+      if (['apk', 'dmg', 'iso', 'exe'].includes(ext)) return '💿';
+      return '📄';
+    };
+
+    /**
+     * Builds a hierarchical tree structure from file list
      */
     window.app.buildFileTree = function(files) {
       const tree = {
@@ -27,23 +43,24 @@
         children: []
       };
 
+      if (!files || !files.length) return tree;
+
       files.forEach(file => {
         let fileName = file.name || '';
         let fileSize = file.size || '0 B';
+        const isDir = (fileSize === '<dir>');
 
-        // Parse volume entries (💾 Macintosh HD — /)
+        // Parse volume header entries (💾 VolumeName — /Volumes/Path)
         if (fileName.startsWith('💾')) {
           const match = fileName.match(/💾\s*([^—]+)\s*—\s*(.+)/);
           if (match) {
             const volumeName = match[1].trim();
             const mountPoint = match[2].trim();
-
-            // Add volume as root-level folder
             let volumeNode = tree.children.find(c => c.name === volumeName);
             if (!volumeNode) {
               volumeNode = {
                 name: volumeName,
-                path: mountPoint,
+                path: volumeName,
                 type: 'volume',
                 size: fileSize,
                 sizeBytes: this.parseSize(fileSize),
@@ -51,57 +68,66 @@
                 icon: '💾'
               };
               tree.children.push(volumeNode);
+              // Auto-expand top-level volume
+              this.expandedFolders.add(volumeName);
             }
           }
+          return;
         }
-        // Parse file paths (Macintosh HD/Applications)
-        else if (fileName.includes('/')) {
-          const parts = fileName.split('/');
-          const volumeName = parts[0];
-          const filePath = parts.slice(1).join('/');
 
-          // Find or create volume
-          let volumeNode = tree.children.find(c => c.name === volumeName);
-          if (!volumeNode) {
-            volumeNode = {
-              name: volumeName,
-              path: '/' + volumeName,
-              type: 'volume',
-              size: '0 B',
-              sizeBytes: 0,
-              children: [],
-              icon: '💾'
-            };
-            tree.children.push(volumeNode);
-          }
+        // Relative path segments: e.g. "NO NAME/DCIM/10. HOLI.mpg" or "Documents/file.pdf"
+        const segments = fileName.split('/').filter(s => s.trim().length > 0);
+        if (!segments.length) return;
 
-          // Add file/folder to volume
-          if (filePath) {
-            const isDir = fileSize === '<dir>';
-            volumeNode.children.push({
-              name: filePath,
-              path: fileName,
-              type: isDir ? 'folder' : 'file',
-              size: isDir ? '—' : fileSize,
-              sizeBytes: isDir ? 0 : this.parseSize(fileSize),
-              children: isDir ? [] : undefined,
-              icon: isDir ? '📁' : '📄'
-            });
+        let currentLevel = tree.children;
+        let currentPath = '';
+
+        segments.forEach((seg, idx) => {
+          const isLast = (idx === segments.length - 1);
+          currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+
+          let existingNode = currentLevel.find(n => n.name === seg);
+
+          if (isLast) {
+            if (!existingNode) {
+              const node = {
+                name: seg,
+                path: currentPath,
+                type: isDir ? 'folder' : 'file',
+                size: isDir ? '—' : fileSize,
+                sizeBytes: isDir ? 0 : this.parseSize(fileSize),
+                children: isDir ? [] : undefined,
+                icon: isDir ? '📁' : this.getFileIcon(seg)
+              };
+              currentLevel.push(node);
+            } else if (!isDir) {
+              existingNode.type = 'file';
+              existingNode.size = fileSize;
+              existingNode.sizeBytes = this.parseSize(fileSize);
+              existingNode.icon = this.getFileIcon(seg);
+            }
+          } else {
+            // Intermediate folder
+            if (!existingNode) {
+              existingNode = {
+                name: seg,
+                path: currentPath,
+                type: (idx === 0 && currentLevel === tree.children) ? 'volume' : 'folder',
+                size: '—',
+                sizeBytes: 0,
+                children: [],
+                icon: (idx === 0 && currentLevel === tree.children) ? '💾' : '📁'
+              };
+              currentLevel.push(existingNode);
+              // Auto-expand root folder/volume
+              if (idx === 0) {
+                this.expandedFolders.add(currentPath);
+              }
+            }
+            if (!existingNode.children) existingNode.children = [];
+            currentLevel = existingNode.children;
           }
-        }
-        // Standalone files
-        else {
-          const isDir = fileSize === '<dir>';
-          tree.children.push({
-            name: fileName,
-            path: fileName,
-            type: isDir ? 'folder' : 'file',
-            size: isDir ? '—' : fileSize,
-            sizeBytes: isDir ? 0 : this.parseSize(fileSize),
-            children: isDir ? [] : undefined,
-            icon: isDir ? '📁' : '📄'
-          });
-        }
+        });
       });
 
       return tree;

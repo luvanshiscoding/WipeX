@@ -162,19 +162,20 @@
      * Internal wipe execution (called after modal confirmation)
      */
     window.app._executeWipeInternal = async function() {
-      this.goToPhase(4);
+      this.goToPhase(3);
       this.resetWipeCanvas();
       this.isWiping = true;
       this.wipeCompleted = false;
+      this.phaseCompleted[3] = false;
       this.phaseCompleted[4] = false;
       this.phaseCompleted[5] = false;
       this.phaseCompleted[6] = false;
       this.renderStepper();
 
-      const cryptoHelper = window.WipeXCrypto;
+      const cryptoHelper = window.WipeXCrypto || window.AegisCrypto;
       this.currentNonce = cryptoHelper.generateNonce();
 
-      const proceedBtn = document.getElementById('btn-proceed-phase-5');
+      const proceedBtn = document.getElementById('btn-proceed-phase-4');
       if (proceedBtn) proceedBtn.disabled = true;
 
       // Start wipe on backend
@@ -221,7 +222,7 @@
           self.wipeProgress = 100;
           self.isWiping = false;
           self.wipeCompleted = true;
-          self.phaseCompleted[4] = true;
+          self.phaseCompleted[3] = true;
           clearInterval(self.wipeInterval);
           self.updateWipeUI();
           self.drawCanvas();

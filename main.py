@@ -139,6 +139,9 @@ def generate_certificate(request: CertGenerateRequest):
     
     devices = database.get_all_devices()
     device_info = next((d for d in devices if d["id"] == record["device_id"]), None)
+    if not device_info:
+        real_devices = WipeEngine().probe_devices()
+        device_info = next((d for d in real_devices if d["id"] == record["device_id"] or d.get("serialNumber") == record["device_id"]), None)
     
     cert_data = CryptoSigner.create_certificate(record, device_info)
     cert_data["wipe_id"] = wipe_id

@@ -242,7 +242,7 @@ def save_wipe_record(wipe_id: str, device_id: str, method: str, nonce: str) -> N
     if USE_POSTGRES:
         cursor.execute("SELECT device_id FROM devices WHERE device_id::text = %s OR serial_number = %s LIMIT 1", (device_id, device_id))
         row = cursor.fetchone()
-        db_dev_id = row[0] if row else None
+        db_dev_id = str(row[0]) if row else str(device_id)
         cursor.execute("""
             INSERT INTO wipe_records (wipe_id, device_id, sanitization_standard, low_level_command, pre_wipe_nonce, status, progress)
             VALUES (%s, %s, %s, %s, %s, 'IN_PROGRESS', 0)

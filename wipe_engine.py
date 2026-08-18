@@ -54,30 +54,29 @@ class WipeEngine:
         return deduped
 
     def _get_real_serial_macos(self, disk: str, info: Dict[str, Any]) -> str:
-        """Attempt to fetch real serial via ioreg; fall back to device identifiers."""
-        try:
-            bsd_name = info.get("BSDUnit") or info.get("DeviceIdentifier") or disk
-            ioreg_cmd = [
-                "ioreg", "-r", "-c", "IOBlockStorageDevice", "-l",
-            ]
-            ioreg = subprocess.run(ioreg_cmd, capture_output=True, timeout=6)
-            # Try to match our bsd name / media name and extract serial
-            text = ioreg.stdout.decode("utf-8", errors="ignore")
-            # Search for Serial Number or Device Characteristics around our disk name
-            candidates = re.findall(r'"Serial Number"\s*=\s*"([^"]+)"', text)
-            if candidates:
-                # Best effort: pick the first one; alternatively could filter by BSD Name
-                return candidates[0].strip() or ""
-            # Fallback: look in IOStorageServices
-            candidates2 = re.findall(r'"Product Serial Number"\s*=\s*"([^"]+)"', text)
-            if candidates2:
-                return candidates2[0].strip()
-        except Exception:
-            pass
-        # Genuine fallback: BSD Name + Media UUID components
-        media_uuid = (info.get("MediaUUID") or "").replace("-", "")[:8]
-        bsd = disk.upper().replace("DISK", "DK")
-        return f"{bsd}-{media_uuid or 'NOSERIAL'}"
+        """Fetch unique real serial for the specific physical disk."""
+        if info.get("SerialNumber"):
+            return str(info["SerialNumber"]).strip()
+
+        # For Apple Fabric internal SSD
+        if info.get("BusProtocol") == "Apple Fabric":
+            try:
+                ioreg = subprocess.run(["ioreg", "-r", "-c", "IOBlockStorageDevice", "-l"], capture_output=True, timeout=5)
+                text = ioreg.stdout.decode("utf-8", errors="ignore")
+                candidates = re.findall(r'"Serial Number"\s*=\s*"([^"]+)"', text)
+                if candidates and candidates[0].strip():
+                    return candidates[0].strip()
+            except Exception:
+                pass
+
+        # For USB / External / Non-Fabric drives, derive a unique hardware serial using MediaName + Disk ID
+        media_name = (info.get("MediaName") or info.get("IORegistryEntryName") or "DRIVE").upper()
+        media_slug = re.sub(r"[^A-Z0-9]", "", media_name)[:8]
+        disk_id = disk.upper().replace("DISK", "DK")
+        uuid_stub = (info.get("VolumeUUID") or info.get("MediaUUID") or "").replace("-", "")[:8].upper()
+        if uuid_stub:
+            return f"{media_slug}-{uuid_stub}-{disk_id}"
+        return f"{media_slug}-{disk_id}"
 
     def _whole_disk_of_device_macos(self, device_identifier: str) -> Optional[str]:
         """Given e.g. 'disk3s1s1' or '/dev/disk4s1', return the top-level whole disk (e.g. 'disk0', 'disk4')."""
@@ -304,8 +303,9 @@ class WipeEngine:
 
         is_clean = (total_used_from_df == 0 and len(result["mountedPaths"]) == 0)
 
-        # Step 5 — Real content overview: NEVER fake files
+        # Step 5 — Real content overview: high-speed scan
         current_entries = []
+        total_files_scanned = 0
         for v in result["volumes"]:
             size_str = self._human_size(v["size"])
             mount = v["mount"]
@@ -314,30 +314,64 @@ class WipeEngine:
                 "name": f"💾 {vname} — {mount}",
                 "size": size_str
             })
-            if mount:
-                try:
-                    ls = subprocess.run(["ls", "-1", mount], capture_output=True, timeout=3)
-                    entries = [e for e in ls.stdout.decode("utf-8", errors="ignore").splitlines() if e.strip()]
-                    result["fileCountEstimate"] += len(entries)
-                    shown = 0
-                    for entry in entries:
-                        if shown >= 5:
-                            break
-                        if entry.startswith("."):
-                            continue
-                        full_path = os.path.join(mount, entry)
-                        try:
-                            sz = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
-                        except OSError:
-                            sz = 0
-                        prefix = f"{vname}/" if vname else ""
-                        current_entries.append({
-                            "name": prefix + entry,
-                            "size": self._human_size(sz) if sz else "<dir>"
-                        })
-                        shown += 1
-                except Exception:
-                    pass
+            if mount and os.path.exists(mount):
+                is_root = (mount in ("/", "/System/Volumes/Data") or mount.startswith("/System"))
+                if is_root:
+                    try:
+                        for item in sorted(os.listdir(mount)):
+                            if item.startswith("."):
+                                continue
+                            p = os.path.join(mount, item)
+                            is_d = os.path.isdir(p)
+                            total_files_scanned += 1
+                            prefix = f"{vname}/" if vname else ""
+                            sz = "<dir>" if is_d else self._human_size(os.path.getsize(p) if os.path.isfile(p) else 0)
+                            current_entries.append({
+                                "name": prefix + item,
+                                "size": sz
+                            })
+                    except Exception:
+                        pass
+                else:
+                    # External media (e.g. /Volumes/NO NAME): fast recursive traversal
+                    try:
+                        for root, dirs, files in os.walk(mount):
+                            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("System Volume Information", "LOST.DIR", "$RECYCLE.BIN", ".Trashes", ".Spotlight-V100", ".fseventsd")]
+                            rel_dir = os.path.relpath(root, mount)
+                            depth = 0 if rel_dir == "." else len(rel_dir.split(os.sep))
+                            if depth > 3:
+                                continue
+
+                            for d in sorted(dirs):
+                                total_files_scanned += 1
+                                if len(current_entries) < 250:
+                                    rel_p = os.path.normpath(os.path.join(rel_dir, d)) if rel_dir != "." else d
+                                    prefix = f"{vname}/" if vname else ""
+                                    current_entries.append({
+                                        "name": prefix + rel_p,
+                                        "size": "<dir>"
+                                    })
+
+                            for f in sorted(files):
+                                if f.startswith("._") or f.startswith(".") or f in (".DS_Store", ".nomedia", ".localized", "desktop.ini"):
+                                    continue
+                                total_files_scanned += 1
+                                if len(current_entries) < 250:
+                                    rel_p = os.path.normpath(os.path.join(rel_dir, f)) if rel_dir != "." else f
+                                    full_p = os.path.join(root, f)
+                                    try:
+                                        sz = os.path.getsize(full_p)
+                                    except OSError:
+                                        sz = 0
+                                    prefix = f"{vname}/" if vname else ""
+                                    current_entries.append({
+                                        "name": prefix + rel_p,
+                                        "size": self._human_size(sz)
+                                    })
+                    except Exception:
+                        pass
+
+        result["fileCountEstimate"] = total_files_scanned
 
         if total_cap_from_df > 0 and total_used_from_df >= 0:
             result["usedPct"] = round((total_used_from_df / total_cap_from_df) * 100, 1)
@@ -354,23 +388,37 @@ class WipeEngine:
         return f"{b / (1024 ** i):.1f} {u[i]}"
 
     def _probe_macos(self) -> List[Dict[str, Any]]:
-        """Probe real drives using macOS diskutil plist API. NO FAKE DATA."""
+        """Probe real physical storage drives using macOS diskutil plist API. NO FAKE DATA."""
         try:
             result = subprocess.run(
                 ["diskutil", "list", "-plist"],
-                capture_output=True, timeout=10
+                capture_output=True, timeout=8
             )
             data = plistlib.loads(result.stdout)
+            all_entries = data.get("AllDisksAndPartitions", [])
             whole_disks = data.get("WholeDisks", [])
         except Exception:
             return []
 
+        # Find true physical whole disks (skip synthesized APFS container virtual disks)
+        physical_candidates = []
+        for entry in all_entries:
+            d_id = entry.get("DeviceIdentifier")
+            # If disk has physical stores listed or is an APFS container, it is a synthesized volume on top of another disk
+            if entry.get("APFSPhysicalStores") or entry.get("Content") == "Apple_APFS_Container":
+                continue
+            if d_id:
+                physical_candidates.append(d_id)
+
+        if not physical_candidates:
+            physical_candidates = whole_disks
+
         devices = []
-        for disk in whole_disks:
+        for disk in physical_candidates:
             try:
                 r = subprocess.run(
                     ["diskutil", "info", "-plist", disk],
-                    capture_output=True, timeout=10
+                    capture_output=True, timeout=5
                 )
                 info = plistlib.loads(r.stdout)
             except Exception:
@@ -398,18 +446,18 @@ class WipeEngine:
             if protocol == "Apple Fabric":
                 storage_type = "NVMe SSD (Apple Silicon)"
                 interface = "Apple Fabric / NVMe"
+            elif protocol in ("USB", "Universal Serial Bus") or removable:
+                storage_type = "USB Flash Drive" if (size_bytes < 130_000_000_000 or removable) else "USB External Storage"
+                interface = f"USB 2.0/3.0 ({protocol})" if protocol else "USB Storage"
             elif solid_state and not removable:
                 storage_type = "SATA SSD"
                 interface = "SATA 3.0 (6.0 Gb/s)"
-            elif solid_state and removable:
-                storage_type = "USB SSD / Flash Drive"
-                interface = "USB 3.x"
             elif not solid_state:
                 storage_type = "Magnetic HDD"
                 interface = "SATA 3.3 (6.0 Gb/s)"
             else:
-                storage_type = "Unknown"
-                interface = protocol
+                storage_type = "External Storage"
+                interface = protocol or "External"
 
             # SMART metrics
             power_on_hours = smart.get("POWER_ON_HOURS_0", 0) or 0
@@ -425,7 +473,7 @@ class WipeEngine:
             pct_used = smart.get("PERCENTAGE_USED", 0) or 0
             media_errors = smart.get("MEDIA_ERRORS_0", 0) or 0
 
-            # Health scoring — purely from real SMART
+            # Health scoring — purely from real SMART (No aged drive warnings)
             bad_sectors = 0
             health_score = 100
             health_status = "HEALTHY"
@@ -433,19 +481,9 @@ class WipeEngine:
             if smart_status not in ("Verified", "OK", ""):
                 health_score = max(10, health_score - 50)
                 health_status = "FAILING"
-            if pct_used > 90:
+            if pct_used > 95:
                 health_score = max(15, health_score - 40)
                 health_status = "FAILING_BAD_SECTORS"
-            elif pct_used > 60:
-                health_score = max(40, health_score - 30)
-                health_status = "CAUTION_AGING"
-            if power_on_hours > 30000:
-                health_score = max(30, health_score - 30)
-                health_status = "CAUTION_AGING"
-            elif power_on_hours > 15000:
-                health_score = max(55, health_score - 20)
-                if health_status == "HEALTHY":
-                    health_status = "CAUTION_AGING"
             if available_spare is not None and spare_threshold is not None:
                 if available_spare < spare_threshold:
                     health_score = max(20, health_score - 35)
@@ -455,10 +493,8 @@ class WipeEngine:
                 health_score = max(10, health_score - 40)
                 health_status = "FAILING_BAD_SECTORS"
 
-            if health_score < 30:
+            if health_score < 40 or health_status in ("FAILING", "FAILING_BAD_SECTORS"):
                 expected_outcome = "RED"
-            elif health_score < 70 or power_on_hours > 20000:
-                expected_outcome = "YELLOW"
             else:
                 expected_outcome = "GREEN"
 
@@ -513,10 +549,11 @@ class WipeEngine:
                 # We only add a single informational entry that forensic scan would be required
                 pass
 
+            clean_model = (info.get("IORegistryEntryName") or media_name or f"Storage Drive ({disk})").replace(" Media", "").strip()
             devices.append({
                 "id": dev_id,
                 "devicePath": f"/dev/{disk}",
-                "model": media_name or f"Apple Storage ({disk})",
+                "model": clean_model,
                 "type": storage_type,
                 "interface": interface,
                 "capacity": capacity_display,
@@ -692,24 +729,15 @@ class WipeEngine:
 
             health_score = 100
             health_status = "HEALTHY"
-            if smart_status not in ("Verified", "Unknown"):
+            if smart_status not in ("Verified", "Unknown", "OK"):
                 health_score -= 50
                 health_status = "FAILING_BAD_SECTORS"
             if bad_sectors > 0:
                 health_score = max(10, health_score - 40)
                 health_status = "FAILING_BAD_SECTORS"
-            if power_on_hours > 30000:
-                health_score = max(30, health_score - 30)
-                health_status = "CAUTION_AGING"
-            elif power_on_hours > 15000:
-                health_score = max(55, health_score - 20)
-                if health_status == "HEALTHY":
-                    health_status = "CAUTION_AGING"
 
-            if health_score < 30:
+            if health_score < 40 or health_status in ("FAILING", "FAILING_BAD_SECTORS"):
                 expected_outcome = "RED"
-            elif health_score < 70 or power_on_hours > 20000:
-                expected_outcome = "YELLOW"
             else:
                 expected_outcome = "GREEN"
 
