@@ -57,6 +57,17 @@ class WipeXApp {
         recommendedFor: "General / Non-Sensitive Media"
       },
       {
+        id: "nist-800-88-purge",
+        name: "NIST 800-88 Full Purge",
+        standard: "NIST SP 800-88",
+        tier: "Enterprise Compliance Tier",
+        fullName: "NIST SP 800-88 Rev. 1 Full Lifecycle (Clear + Verify + Purge)",
+        oneLine: "Industry standard 3-stage lifecycle: 0x00 overwrite, sector verification, and cryptographic/purge erase.",
+        speedBadge: "Medium (10-15 mins)",
+        securityBadge: "Highest Security",
+        recommendedFor: "Enterprise Compliance"
+      },
+      {
         id: "purge-nvme-crypto",
         name: "NVMe Cryptographic Purge",
         standard: "NIST Purge",
@@ -77,6 +88,17 @@ class WipeXApp {
         speedBadge: "Fast (3-5 mins)",
         securityBadge: "High Security",
         recommendedFor: "SATA SSD"
+      },
+      {
+        id: "three-pass",
+        name: "Three Pass Overwrite",
+        standard: "3-Pass Overwrite",
+        tier: "Multi-Pass Overwrite Tier",
+        fullName: "General-Purpose 3-Pass Overwrite (Zeros, Ones, Random)",
+        oneLine: "Sequential multi-pass overwrite with binary zeros, ones, and cryptographic random data.",
+        speedBadge: "Standard (15-30 mins)",
+        securityBadge: "High Security",
+        recommendedFor: "USB / General Storage"
       },
       {
         id: "dod-3pass",

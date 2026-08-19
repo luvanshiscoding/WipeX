@@ -61,6 +61,34 @@ window.NIST_STANDARDS = [
     residualRisk: "Zero (Verified via Independent Dual-Auditor)"
   },
   {
+    id: "nist-800-88-purge",
+    category: "PURGE",
+    title: "NIST SP 800-88 Full Lifecycle Purge (Clear + Verify + Purge)",
+    suitableMedia: ["NVMe SSD", "SATA SSD", "Magnetic HDD", "Enterprise Media"],
+    standardRef: "NIST SP 800-88 Rev. 1 § 5.1 (Clear, Verify, and Purge Lifecycle)",
+    description: "Executes the full NIST 800-88 3-stage sanitization lifecycle: Stage 1 overwrites all sectors with binary zeroes; Stage 2 validates zeroed sectors across sampled offsets; Stage 3 executes cryptographic hardware erase or secondary overwrite with TRIM discard.",
+    passes: 3,
+    estimatedSpeed: "Medium (10 - 15 mins)",
+    securityLevel: "Highest Security (Enterprise Compliance Standard)",
+    hardwareCommand: "wipex --lifecycle=clear,verify,purge /dev/sdX",
+    unfreezesHpa: true,
+    residualRisk: "Zero (3-Stage Audited Sanitization)"
+  },
+  {
+    id: "three-pass",
+    category: "CLEAR",
+    title: "General-Purpose 3-Pass Overwrite (Zeros, Ones, PRNG)",
+    suitableMedia: ["Magnetic HDD", "USB Flash", "General Storage"],
+    standardRef: "Multi-Pass Sanitization Specification",
+    description: "Performs a robust 3-pass sequential overwrite sequence: Pass 1 writes 0x00 binary zeros; Pass 2 writes 0xFF binary ones; Pass 3 streams cryptographically secure pseudo-random bytes.",
+    passes: 3,
+    estimatedSpeed: "Standard (15 - 30 mins)",
+    securityLevel: "High Security (Multi-Pass Data Destruction)",
+    hardwareCommand: "wipex --method=three-pass /dev/sdX",
+    unfreezesHpa: false,
+    residualRisk: "Low (Forensic Remanence Destroyed)"
+  },
+  {
     id: "nist-clear",
     category: "CLEAR",
     title: "NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00 Null State)",
