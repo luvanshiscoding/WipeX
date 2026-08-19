@@ -107,6 +107,30 @@
 
           <!-- Drive Status Panel (appears when a drive is selected) -->
           <div class="drive-status-panel" id="drive-status-panel" style="display:none;">
+            
+            <!-- Prominent Wipe Scope Switcher Card -->
+            <div class="wipe-scope-card" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:12px 16px; background:rgba(0,240,255,0.06); border:1px solid rgba(0,240,255,0.25); border-radius:var(--radius-md); margin-bottom:12px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                  <span>Sanitization Scope:</span>
+                  <span id="active-scope-badge" style="background:rgba(0,240,255,0.15); color:var(--cyan-neon); font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; border:1px solid rgba(0,240,255,0.3);">Full Drive Wipe</span>
+                </div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;" id="active-scope-desc">
+                  Erasing 100% of physical storage media and all partitions.
+                </div>
+              </div>
+
+              <!-- Big Easy-to-Find Toggle Buttons -->
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button type="button" class="btn btn-chip active" id="btn-mode-entire-drive" onclick="app.setWipeMode('entire')" style="font-size:12px; font-weight:700; padding:6px 14px;">
+                  Full Drive Wipe
+                </button>
+                <button type="button" class="btn btn-chip" id="btn-mode-selective-files" onclick="app.setWipeMode('selective')" style="font-size:12px; font-weight:700; padding:6px 14px;">
+                  ☑️ Selective File Wipe
+                </button>
+              </div>
+            </div>
+
             <div class="drive-status-header">
               <div class="drive-status-title">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
@@ -124,19 +148,37 @@
             </div>
 
             <!-- Explorer Toolbar -->
-            <div class="explorer-toolbar">
-              <button class="toolbar-btn active" id="toolbar-all" onclick="app.filterExplorerView('all')">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                All Content (<span id="sidebar-all-count">0</span>)
-              </button>
-              <button class="toolbar-btn" id="toolbar-active" onclick="app.filterExplorerView('active')">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                Active Files (<span id="sidebar-active-count">0</span>)
-              </button>
-              <button class="toolbar-btn" id="toolbar-recoverable" onclick="app.filterExplorerView('recoverable')">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-                Recoverable (<span id="sidebar-recoverable-count">0</span>)
-              </button>
+            <div class="explorer-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button type="button" class="toolbar-btn active" id="toolbar-all" onclick="app.filterExplorerView('all')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                  All (<span id="sidebar-all-count">0</span>)
+                </button>
+                <button type="button" class="toolbar-btn" id="toolbar-active" onclick="app.filterExplorerView('active')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Active (<span id="sidebar-active-count">0</span>)
+                </button>
+                <button type="button" class="toolbar-btn" id="toolbar-recoverable" onclick="app.filterExplorerView('recoverable')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  Recoverable (<span id="sidebar-recoverable-count">0</span>)
+                </button>
+              </div>
+
+              <!-- Selection helpers shown in File Wipe mode -->
+              <div id="selective-controls" style="display:none; align-items:center; gap:6px;">
+                <button type="button" class="toolbar-btn" onclick="app.selectAllFiles(true)" style="font-size:11px; padding:4px 10px; font-weight:700;">
+                  ✓ Select All
+                </button>
+                <button type="button" class="toolbar-btn" onclick="app.selectAllFiles(false)" style="font-size:11px; padding:4px 10px;">
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <!-- Targeted Selection Status Bar -->
+            <div id="targeted-selection-bar" style="display:none; padding:8px 14px; background:rgba(0,240,255,0.08); border-bottom:1px solid rgba(0,240,255,0.25); font-size:12px; align-items:center; justify-content:space-between; color:var(--cyan-neon);">
+              <span id="targeted-selection-text">🎯 <strong>File Wipe Mode:</strong> 0 files selected</span>
+              <span style="font-size:11px; opacity:0.85;">Check files below to shred only those items</span>
             </div>
 
             <!-- Explorer Main -->

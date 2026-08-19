@@ -196,27 +196,45 @@
     };
 
     proto.updateTargetedSelectionBar = function() {
-      const bar = document.getElementById('targeted-selection-bar');
-      const textEl = document.getElementById('targeted-selection-text');
+      const isSelective = (this.wipeScope === 'selective');
       const count = this.selectedFileNames ? this.selectedFileNames.size : 0;
 
-      if (!bar) return;
+      const badgeEl = document.getElementById('active-scope-badge');
+      const descEl = document.getElementById('active-scope-desc');
+      const bar = document.getElementById('targeted-selection-bar');
+      const textEl = document.getElementById('targeted-selection-text');
 
-      if (count > 0) {
-        bar.style.display = 'flex';
-        if (textEl) {
-          textEl.innerHTML = `🎯 <strong>Targeted File Mode:</strong> ${count} file${count === 1 ? '' : 's'} selected for secure shredding`;
+      if (badgeEl) {
+        badgeEl.textContent = isSelective 
+          ? (count > 0 ? `File Wipe (${count} Selected)` : 'File Wipe Mode') 
+          : 'Full Drive Wipe';
+      }
+
+      if (descEl) {
+        descEl.textContent = isSelective
+          ? (count > 0 ? `Shredding ${count} selected file(s). Remaining drive data will be preserved.` : 'Check the files below that you want to permanently shred.')
+          : 'Erasing 100% of physical storage media and all partitions.';
+      }
+
+      if (bar) {
+        if (isSelective) {
+          bar.style.display = 'flex';
+          if (textEl) {
+            textEl.innerHTML = count > 0
+              ? `🎯 <strong>File Wipe Mode:</strong> ${count} file${count === 1 ? '' : 's'} selected for permanent shredding`
+              : `🎯 <strong>File Wipe Mode:</strong> Select one or more files below using the checkboxes`;
+          }
+        } else {
+          bar.style.display = 'none';
         }
-      } else {
-        bar.style.display = 'none';
       }
 
       const goBtn = document.getElementById('btn-go-phase-2');
       if (goBtn) {
         const span = goBtn.querySelector('span');
         if (span) {
-          if (count > 0) {
-            span.textContent = `Continue to Shred Selected (${count} File${count === 1 ? '' : 's'})`;
+          if (isSelective && count > 0) {
+            span.textContent = `Proceed to Shred Selected (${count} File${count === 1 ? '' : 's'})`;
           } else {
             span.textContent = 'Continue to Sanitization Method';
           }
