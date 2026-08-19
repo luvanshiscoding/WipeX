@@ -181,7 +181,135 @@ def verify_certificate(cert_id: str):
         tamperDetected=cert.get("tamperDetected", False)
     )
 
+@app.get("/api/methods")
+def get_sanitization_methods():
+    """Returns the complete catalog of supported sanitization standards and methods."""
+    return [
+        {
+            "id": "purge-nvme-crypto",
+            "name": "NIST SP 800-88 Purge (NVMe Cryptographic Erase)",
+            "standard": "NIST SP 800-88 Rev. 1",
+            "passes": 1,
+            "speed": "Instant (1-2 mins)",
+            "security": "Highest Security",
+            "recommendedFor": "NVMe SSD",
+            "description": "Hardware-level controller cryptographic erase destroying Media Encryption Keys."
+        },
+        {
+            "id": "purge-nvme-block",
+            "name": "NIST SP 800-88 Purge (NVMe Block Erase)",
+            "standard": "NIST SP 800-88 Rev. 1",
+            "passes": 1,
+            "speed": "Fast (2-4 mins)",
+            "security": "Highest Security",
+            "recommendedFor": "NVMe SSD",
+            "description": "Hardware-level flash block reset across all physical NAND channels."
+        },
+        {
+            "id": "sed-opal-crypto",
+            "name": "TCG Opal 2.0 SED Cryptographic Erase",
+            "standard": "TCG Opal 2.0 / IEEE 2883",
+            "passes": 1,
+            "speed": "Instant (1-2 mins)",
+            "security": "Highest Security",
+            "recommendedFor": "Self-Encrypting SSD",
+            "description": "Instant cryptographic erasure on hardware Self-Encrypting Drives (SED)."
+        },
+        {
+            "id": "purge-ata-secure",
+            "name": "NIST SP 800-88 Purge (ATA Enhanced Secure Erase)",
+            "standard": "NIST SP 800-88 Rev. 1",
+            "passes": 1,
+            "speed": "Fast (3-5 mins)",
+            "security": "High Security",
+            "recommendedFor": "SATA SSD / Modern HDD",
+            "description": "Internal drive firmware purge issuing high-voltage pulse across memory cells."
+        },
+        {
+            "id": "nist-clear",
+            "name": "NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00)",
+            "standard": "NIST SP 800-88 Rev. 1",
+            "passes": 1,
+            "speed": "Standard (10-20 mins)",
+            "security": "Standard Security",
+            "recommendedFor": "General Storage / USB",
+            "description": "Single-pass 0x00 logical block overwrite across all addressable storage."
+        },
+        {
+            "id": "dod-3pass",
+            "name": "DoD 5220.22-M (3-Pass Overwrite)",
+            "standard": "DoD 5220.22-M",
+            "passes": 3,
+            "speed": "Standard (20-40 mins)",
+            "security": "High Security",
+            "recommendedFor": "Magnetic HDD / Military",
+            "description": "3-Pass overwrite using 0x00, 0xFF, and pseudo-random byte patterns."
+        },
+        {
+            "id": "dod-7pass",
+            "name": "DoD 5220.22-M (ECE) (7-Pass Overwrite)",
+            "standard": "DoD 5220.22-M ECE",
+            "passes": 7,
+            "speed": "Extended (40-90 mins)",
+            "security": "High Security",
+            "recommendedFor": "Magnetic HDD / High-Security",
+            "description": "7-Pass alternating bit pattern overwrite with random verification pass."
+        },
+        {
+            "id": "gutmann-35",
+            "name": "Peter Gutmann (35-Pass Magnetic Recording Suite)",
+            "standard": "Peter Gutmann 35-Pass",
+            "passes": 35,
+            "speed": "Extended Duration",
+            "security": "Maximum Security",
+            "recommendedFor": "Legacy & Modern Magnetic HDD",
+            "description": "35-Pass magnetic flux transition suite targeting PRML and MFM encoding layers."
+        },
+        {
+            "id": "quick-zero",
+            "name": "Quick Zero Fill (Single-Pass 0x00)",
+            "standard": "Basic Zero Fill",
+            "passes": 1,
+            "speed": "Fast (5-10 mins)",
+            "security": "Standard Security",
+            "recommendedFor": "Scratch / Test Drives",
+            "description": "Fast continuous single-pass zero overwrite."
+        }
+    ]
+
+@app.get("/api/crypto/public-key")
+def get_crypto_public_key():
+    """Returns the platform authority NIST P-256 ECDSA public key."""
+    return {
+        "algorithm": "ECDSA-secp256r1-SHA256",
+        "publicKeyPem": CryptoSigner.get_public_key_pem()
+    }
+
+@app.get("/api/devices/android")
+def get_android_devices():
+    """Probes connected Android devices via ADB."""
+    engine = WipeEngine()
+    return engine.probe_android_devices()
+
+class AndroidWipeRequest(BaseModel):
+    serial: str
+    mode: str = Field(default="master-clear", description="master-clear, fastboot-format")
+
+@app.post("/api/wipe/android/start")
+def start_android_wipe(request: AndroidWipeRequest, background_tasks: BackgroundTasks):
+    """Executes enterprise mobile sanitization on Android device."""
+    wipe_id = f"WIPE-ANDROID-{int(time.time())}"
+    engine = WipeEngine()
+    background_tasks.add_task(engine.wipe_android_device, wipe_id, request.serial, request.mode)
+    return {
+        "wipeId": wipe_id,
+        "serial": request.serial,
+        "status": "IN_PROGRESS",
+        "message": f"Android wipe ({request.mode}) initialized."
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

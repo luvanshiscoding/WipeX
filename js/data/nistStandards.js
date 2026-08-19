@@ -1,21 +1,50 @@
 /**
- * WipeX - NIST SP 800-88 Rev. 1 & Sanitization Standards Repository
+ * WipeX - Enterprise Sanitization Standards Repository
+ * Compliant with NIST SP 800-88 Rev. 1, DoD 5220.22-M, Peter Gutmann 35-Pass, and IEEE 2883-2022.
  */
 
 window.NIST_STANDARDS = [
   {
     id: "purge-nvme-crypto",
     category: "PURGE",
-    title: "NIST SP 800-88 Purge (NVMe Cryptographic & Block Erase)",
+    title: "NIST SP 800-88 Purge (NVMe Cryptographic Erase)",
     suitableMedia: ["NVMe SSD", "PCIe SSD"],
     standardRef: "NIST SP 800-88 Rev. 1 § 5.1.2 & NVMe 1.4 Command Set",
-    description: "Issues hardware-level NVMe Format with Cryptographic Erase (SES=2). Destroys the Media Encryption Key (MEK) inside the NVMe controller, rendering all NAND flash (including over-provisioned areas) mathematically undecipherable, followed by low-level zeroing.",
+    description: "Issues hardware-level NVMe Sanitize / Format with Cryptographic Erase (SES=2). Destroys the Media Encryption Key (MEK) inside the NVMe controller, rendering all NAND flash (including over-provisioned and retired blocks) mathematically undecipherable in seconds.",
     passes: 1,
-    estimatedSpeed: "400 - 900 MB/s",
-    securityLevel: "HIGH (Defence & Enterprise)",
-    hardwareCommand: "nvme format /dev/nvme0n1 --namespace-id=1 --ses=2 --force",
+    estimatedSpeed: "Instant (Hardware Sanitize)",
+    securityLevel: "Highest Security (Enterprise & Defense)",
+    hardwareCommand: "nvme sanitize /dev/nvme0n1 -a crypto || nvme format /dev/nvme0n1 --ses=2",
     unfreezesHpa: true,
-    residualRisk: "None (Cryptographically impossible to recover)"
+    residualRisk: "None (Mathematically undecipherable)"
+  },
+  {
+    id: "purge-nvme-block",
+    category: "PURGE",
+    title: "NIST SP 800-88 Purge (NVMe Block Erase)",
+    suitableMedia: ["NVMe SSD", "PCIe SSD"],
+    standardRef: "NIST SP 800-88 Rev. 1 & NVMe Sanitize Specification",
+    description: "Low-level controller flash block reset altering the physical voltage state of every NAND storage cell across all internal controller channels and over-provisioned areas.",
+    passes: 1,
+    estimatedSpeed: "Fast (2 - 4 mins)",
+    securityLevel: "Highest Security (Flash Media Standard)",
+    hardwareCommand: "nvme sanitize /dev/nvme0n1 -a block",
+    unfreezesHpa: true,
+    residualRisk: "None (Flash blocks reset to null state)"
+  },
+  {
+    id: "sed-opal-crypto",
+    category: "PURGE",
+    title: "TCG Opal 2.0 SED Cryptographic Erase",
+    suitableMedia: ["Self-Encrypting SSD", "TCG Opal 2.0 SED"],
+    standardRef: "TCG Opal 2.0 Storage Security Specification & IEEE 2883-2022",
+    description: "Issues hardware TCG Opal cryptographic key purge across the internal ASIC security coprocessor, obliterating the global data encryption key and restoring factory credentials.",
+    passes: 1,
+    estimatedSpeed: "Instant (1 - 2 mins)",
+    securityLevel: "Highest Security (Hardware SED Standard)",
+    hardwareCommand: "sedutil-cli --cryptoerase admin1password /dev/sdX",
+    unfreezesHpa: true,
+    residualRisk: "None (Hardware Cryptographic Lockout)"
   },
   {
     id: "purge-ata-secure",
@@ -25,39 +54,81 @@ window.NIST_STANDARDS = [
     standardRef: "NIST SP 800-88 Rev. 1 § 5.1.1 & ATA8-ACS",
     description: "Sends native ATA Enhanced Security Erase command directly to drive microcode. The internal controller applies a vendor-specific voltage pulse to clear all memory cells and overwrite magnetic tracks, unlocking and sanitizing hidden HPA/DCO zones.",
     passes: 1,
-    estimatedSpeed: "180 - 250 MB/s",
-    securityLevel: "HIGH (Corporate IT & Government)",
-    hardwareCommand: "hdparm --user-master u --security-erase-enhanced p wipex /dev/sdX",
+    estimatedSpeed: "Fast (3 - 5 mins)",
+    securityLevel: "High Security (Corporate IT & Government)",
+    hardwareCommand: "hdparm --user-master u --security-set-pass wipex /dev/sdX && hdparm --user-master u --security-erase-enhanced wipex /dev/sdX",
     unfreezesHpa: true,
     residualRisk: "Zero (Verified via Independent Dual-Auditor)"
   },
   {
-    id: "clear-single-overwrite",
+    id: "nist-clear",
     category: "CLEAR",
-    title: "NIST SP 800-88 Clear (Single-Pass 0x00 Overwrite)",
-    suitableMedia: ["Magnetic HDD", "USB Flash"],
+    title: "NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00 Null State)",
+    suitableMedia: ["Magnetic HDD", "USB Flash", "General Storage"],
     standardRef: "NIST SP 800-88 Rev. 1 § 5.1.1 (Clear)",
-    description: "Overwrites all addressable logical blocks with a single pass of constant zeroes (0x00). Protects against simple keyboard recovery and basic forensic lab tools on magnetic storage.",
+    description: "Overwrites all addressable logical blocks with a continuous stream of pure null bytes (0x00) with direct hardware sync. Guarantees 0 recoverable files across standard forensic tools.",
     passes: 1,
-    estimatedSpeed: "120 - 180 MB/s",
-    securityLevel: "STANDARD (Low-Sensitivity Commercial)",
+    estimatedSpeed: "Standard (10 - 20 mins)",
+    securityLevel: "Standard Security (Commercial ITAD Standard)",
     hardwareCommand: "dd if=/dev/zero of=/dev/sdX bs=4M status=progress conv=fdatasync",
     unfreezesHpa: false,
-    residualRisk: "Low (Unsuitable if drive contains bad sectors or hidden HPA)"
+    residualRisk: "Low (Unsuitable if drive contains bad sectors)"
   },
   {
-    id: "purge-dod-3pass",
+    id: "dod-3pass",
     category: "PURGE",
-    title: "DoD 5220.22-M (3-Pass DoD Compliant Overwrite)",
-    suitableMedia: ["Magnetic HDD"],
-    standardRef: "DoD 5220.22-M / NIST SP 800-88 Purge",
-    description: "Pass 1: Fixed character (0x00); Pass 2: Complement byte (0xFF); Pass 3: Pseudo-random byte stream; followed by 100% sector read verification. Standard for legacy magnetic media recycling.",
+    title: "DoD 5220.22-M (3-Pass Hardware Overwrite)",
+    suitableMedia: ["Magnetic HDD", "Enterprise Storage"],
+    standardRef: "DoD 5220.22-M Standard Overwrite Specification",
+    description: "Pass 1: Fixed null byte (0x00); Pass 2: Complement byte (0xFF); Pass 3: Cryptographically secure pseudo-random byte stream; followed by dual-layer Shannon Entropy verification.",
     passes: 3,
-    estimatedSpeed: "80 - 130 MB/s",
-    securityLevel: "VERY HIGH (Legacy Platter Standard)",
-    hardwareCommand: "shred -v -n 3 -z /dev/sdX",
+    estimatedSpeed: "Standard (20 - 40 mins)",
+    securityLevel: "High Security (Military & Enterprise)",
+    hardwareCommand: "wipex --method=dod-3pass /dev/sdX",
     unfreezesHpa: true,
     residualRisk: "Zero"
+  },
+  {
+    id: "dod-7pass",
+    category: "PURGE",
+    title: "DoD 5220.22-M (ECE) (7-Pass High-Security Overwrite)",
+    suitableMedia: ["Magnetic HDD", "Classified Storage"],
+    standardRef: "DoD 5220.22-M Extended Character Erase (ECE)",
+    description: "7-Pass alternating bit pattern overwrite (0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, PRNG random data) with sector-by-sector read verification.",
+    passes: 7,
+    estimatedSpeed: "Extended (40 - 90 mins)",
+    securityLevel: "High Security (Defense Classification)",
+    hardwareCommand: "wipex --method=dod-7pass /dev/sdX",
+    unfreezesHpa: true,
+    residualRisk: "Zero"
+  },
+  {
+    id: "gutmann-35",
+    category: "PURGE",
+    title: "Peter Gutmann (35-Pass Magnetic Recording Pattern Suite)",
+    suitableMedia: ["Magnetic HDD", "Legacy & Modern Platters"],
+    standardRef: "Peter Gutmann 'Secure Deletion of Data from Magnetic and Solid-State Memory' (1996)",
+    description: "35-Pass complete magnetic recording transition suite. Combines 8 random passes with 27 specific magnetic flux transition patterns targeting MFM and (1,7)/(2,7) RLL encoding layers.",
+    passes: 35,
+    estimatedSpeed: "Extended Duration (Multi-Hour)",
+    securityLevel: "Maximum Security (Forensic Laboratory Level)",
+    hardwareCommand: "wipex --method=gutmann-35 /dev/sdX",
+    unfreezesHpa: true,
+    residualRisk: "Zero (Exhaustive Platter Disorientation)"
+  },
+  {
+    id: "quick-zero",
+    category: "CLEAR",
+    title: "Quick Zero Fill (Single-Pass 0x00)",
+    suitableMedia: ["Scratch Media", "Test Drives"],
+    standardRef: "Basic Zeroization",
+    description: "Fast single-pass zero write for non-sensitive data and quick reformatting.",
+    passes: 1,
+    estimatedSpeed: "Fast (5 - 10 mins)",
+    securityLevel: "Standard Security",
+    hardwareCommand: "dd if=/dev/zero of=/dev/sdX bs=4M",
+    unfreezesHpa: false,
+    residualRisk: "Standard"
   },
   {
     id: "destroy-physical",
@@ -68,9 +139,10 @@ window.NIST_STANDARDS = [
     description: "Software sanitization CANNOT guarantee 100% destruction on media with physically damaged/unreachable sectors. System mandates chain-of-custody physical shredding / degaussing to prevent platter-level forensic extraction.",
     passes: 0,
     estimatedSpeed: "N/A (Physical Facility)",
-    securityLevel: "MAXIMUM (Physical Shredder <2mm)",
+    securityLevel: "Maximum Security (Physical Shredder <2mm)",
     hardwareCommand: "echo 'CRITICAL: Physical destruction order generated. Media locked.'",
     unfreezesHpa: false,
     residualRisk: "Zero (Destroyed mechanically)"
   }
 ];
+

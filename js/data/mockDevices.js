@@ -123,7 +123,7 @@ window.MOCK_DEVICES = [
       { id: "0x0A", name: "Spin Retry Count", raw: "0", threshold: "97", status: "PASSED" },
       { id: "0xBB", name: "Reported Uncorrectable", raw: "0", threshold: "0", status: "HEALTHY" }
     ],
-    recommendedMethod: "clear-single",
+    recommendedMethod: "dod-3pass",
     expectedOutcome: "GREEN",
     capacityUsedBytes: 1240000000000,
     capacityUsedPct: 62.0,

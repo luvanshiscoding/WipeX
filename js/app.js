@@ -46,41 +46,67 @@ class WipeXApp {
 
     this.simpleMethods = [
       {
+        id: "quick-zero",
+        name: "Quick IT Asset Clear",
+        standard: "NIST Clear",
+        tier: "Standard ITAD Tier",
+        fullName: "Quick Single-Pass Zero Clear (NIST SP 800-88 Clear)",
+        oneLine: "Fast single-pass null clear for rapid turnaround and internal redeployment.",
+        speedBadge: "Fast (5-10 mins)",
+        securityBadge: "Standard Security",
+        recommendedFor: "General / Non-Sensitive Media"
+      },
+      {
         id: "purge-nvme-crypto",
-        name: "Cryptographic Key Erase",
+        name: "NVMe Cryptographic Purge",
         standard: "NIST Purge",
+        tier: "NVMe Flash Tier",
         fullName: "NIST SP 800-88 Cryptographic Erase (NVMe Purge)",
-        oneLine: "Instantly destroys all encryption keys across the drive controller.",
-        speedBadge: "⚡ Instant (1-2 mins)",
+        oneLine: "Instant hardware encryption key destruction across all flash channels and reserve blocks.",
+        speedBadge: "Instant (1-2 mins)",
         securityBadge: "Highest Security",
         recommendedFor: "NVMe SSD"
       },
       {
         id: "purge-ata-secure",
-        name: "Enhanced Hardware Flash Purge",
+        name: "SATA SSD Enhanced Purge",
         standard: "NIST Purge",
+        tier: "SATA Flash Tier",
         fullName: "NIST SP 800-88 Enhanced Security Erase (Purge)",
-        oneLine: "Hardware-level controller reset clearing 100% of flash memory cells.",
-        speedBadge: "⚡ Fast (3-5 mins)",
+        oneLine: "Native controller firmware reset clearing 100% of flash cells and hidden HPA areas.",
+        speedBadge: "Fast (3-5 mins)",
         securityBadge: "High Security",
         recommendedFor: "SATA SSD"
       },
       {
-        id: "clear-single",
-        name: "Standard Overwrite Clear",
-        standard: "NIST Clear",
-        fullName: "NIST SP 800-88 Standard Overwrite Clear",
-        oneLine: "Overwrites entire magnetic drive surface with zeros (0x00).",
-        speedBadge: "⏱️ Standard (10-20 mins)",
-        securityBadge: "Standard Security",
+        id: "dod-3pass",
+        name: "Magnetic HDD ITAD Standard",
+        standard: "DoD 5220.22-M",
+        tier: "Magnetic Platter Tier",
+        fullName: "DoD 5220.22-M 3-Pass Standard Overwrite",
+        oneLine: "3-Pass sequence using 0x00, 0xFF, and pseudo-random byte patterns for hard drives.",
+        speedBadge: "Standard (20-40 mins)",
+        securityBadge: "High Security",
         recommendedFor: "Magnetic HDD"
+      },
+      {
+        id: "gutmann-35",
+        name: "Deep Forensic Platter Purge",
+        standard: "Gutmann 35-Pass",
+        tier: "High-Assurance / Defense Tier",
+        fullName: "Peter Gutmann 35-Pass Magnetic Recording Pattern Suite",
+        oneLine: "Exhaustive 35-pass magnetic flux transition suite targeting classified and financial storage.",
+        speedBadge: "Extended Duration",
+        securityBadge: "Maximum Security",
+        recommendedFor: "High-Security Platters"
       },
       {
         id: "destroy-physical",
         name: "Physical Destruction Mandate",
         standard: "NIST Destroy",
+        tier: "Mandatory Shred Tier",
         fullName: "Mandatory Mechanical Disintegration (<2mm Shredding)",
-        oneLine: "Required when drive has physical defects or unreadable bad sectors.",
+        oneLine: "Required when drive has physical defects, bad sectors, or failing hardware.",
         speedBadge: "Facility Shredder",
         securityBadge: "Physical Shred",
         recommendedFor: "FAILING"
@@ -559,8 +585,8 @@ class WipeXApp {
         else if (dev.expectedOutcome !== 'RED') {
           if (dev.type && dev.type.includes('NVMe') && m.id === 'purge-nvme-crypto') isRecommended = true;
           else if (dev.type && (dev.type.includes('SATA SSD') || dev.hpaDetected) && m.id === 'purge-ata-secure') isRecommended = true;
-          else if (dev.type && dev.type.includes('Magnetic') && m.id === 'clear-single') isRecommended = true;
-          else if (dev.type && dev.type.includes('USB') && m.id === 'clear-single') isRecommended = true;
+          else if (dev.type && dev.type.includes('Magnetic') && m.id === 'dod-3pass') isRecommended = true;
+          else if (dev.type && dev.type.includes('USB') && m.id === 'quick-zero') isRecommended = true;
         }
       }
 
@@ -572,13 +598,14 @@ class WipeXApp {
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
                 <span class="method-name" style="margin-bottom:0;">${m.name}</span>
                 <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(0,240,255,0.08); color:var(--cyan-neon); font-weight:700;">${m.speedBadge}</span>
-                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary);">${m.securityBadge}</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary); font-weight:600;">${m.securityBadge}</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.04); color:var(--text-muted);">${m.tier}</span>
               </div>
               <div class="method-one-line">${m.oneLine}</div>
               <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Standard: <strong>${m.standard}</strong></div>
             </div>
           </div>
-          ${isRecommended ? '<span class="method-badge-rec">⭐ Recommended</span>' : ''}
+          ${isRecommended ? '<span class="method-badge-rec">Recommended</span>' : ''}
         </div>
       `;
     }).join('');
