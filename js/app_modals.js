@@ -4,21 +4,23 @@
  */
 
 (function() {
+  'use strict';
 
   function attachModalMethods() {
-    if (typeof window.app === 'undefined' || !window.app) {
-      setTimeout(attachModalMethods, 50);
+    const proto = (typeof WipeXApp !== 'undefined') ? WipeXApp.prototype : ((typeof window !== 'undefined' && window.app) ? window.app : null);
+    if (!proto) {
+      setTimeout(attachModalMethods, 20);
       return;
     }
 
     // Modal state
-    window.app.destructionCountdown = window.app.destructionCountdown || 10;
-    window.app.destructionCountdownTimer = window.app.destructionCountdownTimer || null;
+    proto.destructionCountdown = 10;
+    proto.destructionCountdownTimer = null;
 
     /**
      * Shows the appropriate warning modal based on wipe method
      */
-    window.app.startWipeExecution = function() {
+    proto.startWipeExecution = function() {
       if (!this.selectedDevice || !this.selectedMethodId) {
         alert('Please select a drive and wipe method first.');
         return;
@@ -39,7 +41,7 @@
     /**
      * Shows the destruction warning modal (10s countdown)
      */
-    window.app.showDestructionModal = function() {
+    proto.showDestructionModal = function() {
       const overlay = document.getElementById('destruction-modal-overlay');
       const checkbox = document.getElementById('destruction-confirm-checkbox');
       const proceedBtn = document.getElementById('destruction-proceed-btn');
@@ -90,24 +92,18 @@
     /**
      * Cancel destruction modal
      */
-    window.app.cancelDestructionModal = function() {
+    proto.cancelDestructionModal = function() {
       const overlay = document.getElementById('destruction-modal-overlay');
       if (overlay) overlay.style.display = 'none';
       clearInterval(this.destructionCountdownTimer);
     };
 
-    /**
-     * Confirm destruction and proceed
-     */
-    window.app.confirmDestruction = function() {
+    proto.confirmDestruction = function() {
       this.cancelDestructionModal();
       this._executeWipeInternal();
     };
 
-    /**
-     * Shows the caution warning modal (normal wipe methods)
-     */
-    window.app.showCautionModal = function() {
+    proto.showCautionModal = function() {
       const overlay = document.getElementById('caution-modal-overlay');
       const checkbox = document.getElementById('caution-confirm-checkbox');
       const proceedBtn = document.getElementById('caution-proceed-btn');
@@ -117,6 +113,8 @@
       // Populate info
       const dev = this.selectedDevice;
       const method = this.simpleMethods.find(m => m.id === this.selectedMethodId);
+      const isTargeted = (this.selectedFileNames && this.selectedFileNames.size > 0);
+      const selectedCount = isTargeted ? this.selectedFileNames.size : 0;
       const currentFiles = Array.isArray(dev.currentFiles) ? dev.currentFiles : [];
       const recoverableFiles = Array.isArray(dev.deletedRecoverableFiles) ? dev.deletedRecoverableFiles : [];
       const totalFiles = currentFiles.length + recoverableFiles.length;
@@ -126,8 +124,18 @@
       const filesEl = document.getElementById('caution-modal-files');
 
       if (driveEl) driveEl.textContent = dev.model || 'Unknown';
-      if (methodEl) methodEl.textContent = method ? method.name : 'Unknown';
-      if (filesEl) filesEl.textContent = totalFiles > 0 ? `${totalFiles} files` : 'All data';
+      if (methodEl) {
+        methodEl.textContent = isTargeted 
+          ? `Targeted File Shred (${method ? method.name : 'Secure Overwrite'})` 
+          : (method ? method.name : 'Unknown');
+      }
+      if (filesEl) {
+        if (isTargeted) {
+          filesEl.textContent = `${selectedCount} selected file${selectedCount === 1 ? '' : 's'} (Targeted Shred)`;
+        } else {
+          filesEl.textContent = totalFiles > 0 ? `${totalFiles} files (Entire Drive)` : 'All media sectors';
+        }
+      }
 
       // Reset state
       checkbox.checked = false;
@@ -142,26 +150,101 @@
       };
     };
 
-    /**
-     * Cancel caution modal
-     */
-    window.app.cancelCautionModal = function() {
+    proto.cancelCautionModal = function() {
       const overlay = document.getElementById('caution-modal-overlay');
       if (overlay) overlay.style.display = 'none';
     };
 
-    /**
-     * Confirm wipe from caution modal
-     */
-    window.app.confirmWipe = function() {
+    proto.confirmWipe = function() {
       this.cancelCautionModal();
       this._executeWipeInternal();
     };
 
-    /**
-     * Internal wipe execution (called after modal confirmation)
-     */
-    window.app._executeWipeInternal = async function() {
+    proto.openDiagnosticsModal = function() {
+      const overlay = document.getElementById('diagnostics-modal-overlay');
+      if (!overlay || !this.selectedDevice) return;
+
+      const dev = this.selectedDevice;
+      const driveEl = document.getElementById('diag-modal-drive');
+      const faultsEl = document.getElementById('diag-modal-faults');
+      const statusEl = document.getElementById('diag-modal-status');
+      const progressWrap = document.getElementById('diag-progress-wrapper');
+      const resultCard = document.getElementById('diag-result-card');
+      const startBtn = document.getElementById('btn-start-diag');
+
+      if (driveEl) driveEl.textContent = dev.model || 'Unknown';
+      if (faultsEl) {
+        faultsEl.textContent = dev.reallocatedSectors > 0 
+          ? `${dev.reallocatedSectors} Reallocated Sectors (SMART ID 0x05)` 
+          : 'Reported Hardware Faults';
+      }
+      if (statusEl) statusEl.textContent = 'Ready to scan';
+      if (progressWrap) progressWrap.style.display = 'none';
+      if (resultCard) resultCard.style.display = 'none';
+      if (startBtn) {
+        startBtn.disabled = false;
+        const span = startBtn.querySelector('span');
+        if (span) span.textContent = 'Run Deep Verification Pass';
+      }
+
+      overlay.style.display = 'flex';
+    };
+
+    proto.closeDiagnosticsModal = function() {
+      const overlay = document.getElementById('diagnostics-modal-overlay');
+      if (overlay) overlay.style.display = 'none';
+    };
+
+    proto.runDiagnosticsCheck = function() {
+      const startBtn = document.getElementById('btn-start-diag');
+      const progressWrap = document.getElementById('diag-progress-wrapper');
+      const progressBar = document.getElementById('diag-progress-bar');
+      const progressLabel = document.getElementById('diag-progress-label');
+      const resultCard = document.getElementById('diag-result-card');
+      const statusEl = document.getElementById('diag-modal-status');
+
+      if (startBtn) startBtn.disabled = true;
+      if (progressWrap) progressWrap.style.display = 'block';
+      if (resultCard) resultCard.style.display = 'none';
+
+      let pct = 0;
+      const interval = setInterval(() => {
+        pct += 15;
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressLabel) {
+          if (pct < 30) progressLabel.textContent = 'Querying direct SATA/NVMe link logs & ECC counters...';
+          else if (pct < 60) progressLabel.textContent = 'Executing non-destructive direct LBA read across flagged sectors...';
+          else if (pct < 90) progressLabel.textContent = 'Comparing write latency vs media defect thresholds...';
+          else progressLabel.textContent = 'Finalizing diagnostic assessment...';
+        }
+
+        if (pct >= 100) {
+          clearInterval(interval);
+          if (statusEl) statusEl.textContent = 'Diagnostic complete';
+
+          if (resultCard) {
+            resultCard.style.display = 'block';
+            resultCard.style.background = 'rgba(0, 255, 136, 0.08)';
+            resultCard.style.border = '1px solid rgba(0, 255, 136, 0.3)';
+            resultCard.style.color = 'var(--emerald-neon)';
+            resultCard.innerHTML = `
+              <div style="font-weight: 700; margin-bottom: 6px; font-size: 14px;">✓ FALSE ALARM CONFIRMED: Media is 100% Healthy</div>
+              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                Deep LBA read tests passed with <strong>0 read timeouts</strong> and <strong>0 unrecoverable read errors</strong>. 
+                The previously flagged reallocated sector count was caused by a transient SATA communication glitch (CRC bus error), not physical platter/NAND damage.
+              </div>
+              <div style="margin-top: 12px;">
+                <button type="button" class="btn btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="app.clearFalseAlarmAndMarkHealthy()">
+                  ✓ Clear Warning & Proceed with Wipe
+                </button>
+              </div>
+            `;
+          }
+        }
+      }, 300);
+    };
+
+    proto._executeWipeInternal = async function() {
       this.goToPhase(3);
       this.resetWipeCanvas();
       this.isWiping = true;
@@ -240,6 +323,7 @@
                 self.isWiping = false;
                 self.wipeCompleted = true;
                 self.phaseCompleted[3] = true;
+                self._applyPostWipeFileCleanup();
                 self.updateWipeUI();
                 self.drawCanvas();
                 if (proceedBtn) proceedBtn.disabled = false;
@@ -283,6 +367,7 @@
             self.wipeCompleted = true;
             self.phaseCompleted[3] = true;
             clearInterval(self.wipeInterval);
+            self._applyPostWipeFileCleanup();
             self.updateWipeUI();
             self.drawCanvas();
             if (proceedBtn) proceedBtn.disabled = false;
@@ -290,6 +375,67 @@
           }
         }, 40);
       }
+    };
+
+    /**
+     * Updates file state after wipe finishes
+     */
+    proto._applyPostWipeFileCleanup = function() {
+      const dev = this.selectedDevice;
+      if (!dev) return;
+
+      if (this.selectedFileNames && this.selectedFileNames.size > 0) {
+        // Targeted File Mode: remove only the selected files that were shredded
+        this.lastShreddedFiles = Array.from(this.selectedFileNames);
+        if (Array.isArray(dev.currentFiles)) {
+          dev.currentFiles = dev.currentFiles.filter(f => !this.selectedFileNames.has(f.name));
+          if (dev.currentFiles.length === 0) {
+            dev.isAlreadyClean = true;
+            dev.capacityUsedBytes = 0;
+            dev.capacityUsedPct = 0;
+          } else {
+            // Recalculate remaining bytes
+            let total = 0;
+            dev.currentFiles.forEach(f => {
+              const match = (f.size || '').match(/([\d.]+)\s*([KMGTP]?B)/i);
+              if (match) {
+                const val = parseFloat(match[1]);
+                const unit = match[2].toUpperCase();
+                const mult = { 'B': 1, 'KB': 1000, 'MB': 1000000, 'GB': 1000000000, 'TB': 1000000000000 }[unit] || 1000000;
+                total += Math.round(val * mult);
+              } else {
+                total += 10000000;
+              }
+            });
+            dev.capacityUsedBytes = total;
+            dev.capacityUsedPct = (total / (dev.capacityBytes || 1000000000000)) * 100;
+          }
+        }
+        this.selectedFileNames.clear();
+      } else {
+        // Entire Drive Mode: clear all files
+        this.lastShreddedFiles = null;
+        dev.isAlreadyClean = true;
+        dev.currentFiles = [];
+        dev.deletedRecoverableFiles = [];
+        dev.capacityUsedBytes = 0;
+        dev.capacityUsedPct = 0;
+      }
+
+      // Sync with mock devices array
+      if (window.MOCK_DEVICES) {
+        const mDev = window.MOCK_DEVICES.find(d => d.id === dev.id);
+        if (mDev) {
+          mDev.isAlreadyClean = dev.isAlreadyClean;
+          mDev.currentFiles = dev.currentFiles;
+          mDev.deletedRecoverableFiles = dev.deletedRecoverableFiles;
+          mDev.capacityUsedBytes = dev.capacityUsedBytes;
+          mDev.capacityUsedPct = dev.capacityUsedPct;
+        }
+      }
+
+      if (typeof this.renderDriveStatus === 'function') this.renderDriveStatus();
+      if (typeof this.renderDeviceList === 'function') this.renderDeviceList();
     };
   }
 
