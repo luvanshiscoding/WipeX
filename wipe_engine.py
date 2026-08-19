@@ -389,6 +389,96 @@ class WipeEngine:
         i = min(4, int.bit_length(max(1, b)) // 10)
         return f"{b / (1024 ** i):.1f} {u[i]}"
 
+    def _find_recoverable_deleted_files(self, mounted_paths: List[str], is_already_clean: bool) -> List[Dict[str, Any]]:
+        """
+        Scans mounted volumes for real deleted/trashed files that could be
+        forensically recovered. Checks .Trashes, .Trash-*, $RECYCLE.BIN,
+        LOST.DIR and similar OS trash directories.
+
+        Returns list of recoverable file entries with name, size, and
+        recoverability rating. Returns [] when drive is verified clean.
+        """
+        if is_already_clean:
+            return []
+
+        deleted_files = []
+        system = platform.system()
+
+        # Trash directories to scan per OS
+        trash_dirs = []
+        if system == "Darwin":
+            trash_dirs = [".Trashes", ".Trash"]
+        elif system == "Linux":
+            trash_dirs = [".Trash-1000", ".Trash-0", "LOST.DIR", ".Trash"]
+        elif system == "Windows":
+            trash_dirs = ["$RECYCLE.BIN", "$Recycle.Bin", "RECYCLER"]
+
+        for mount in mounted_paths:
+            if not mount or not os.path.isdir(mount):
+                continue
+            # Skip root / system volumes for safety (would be too noisy)
+            if system == "Darwin" and mount in ("/", "/System/Volumes/Data"):
+                # Only scan user Trash on boot drive
+                user_trash = os.path.expanduser("~/.Trash")
+                try:
+                    if os.path.isdir(user_trash):
+                        for item in os.listdir(user_trash):
+                            if item.startswith("."):
+                                continue
+                            full_path = os.path.join(user_trash, item)
+                            try:
+                                sz = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
+                            except OSError:
+                                sz = 0
+                            deleted_files.append({
+                                "name": f"Trash/{item}",
+                                "size": self._human_size(sz) if sz > 0 else "<dir>" if os.path.isdir(full_path) else "0 B",
+                                "recoverability": "High"
+                            })
+                            if len(deleted_files) >= 50:
+                                break
+                except (PermissionError, OSError):
+                    pass
+                continue
+
+            # Scan trash directories on external/non-root volumes
+            for trash_name in trash_dirs:
+                trash_path = os.path.join(mount, trash_name)
+                try:
+                    if not os.path.isdir(trash_path):
+                        continue
+                    for root, dirs, files in os.walk(trash_path):
+                        dirs[:] = [d for d in dirs if not d.startswith(".")]
+                        rel = os.path.relpath(root, mount)
+                        depth = len(rel.split(os.sep))
+                        if depth > 4:
+                            continue
+                        for f in files:
+                            if f.startswith(".") or f in (".DS_Store", "desktop.ini", ".nomedia"):
+                                continue
+                            full_p = os.path.join(root, f)
+                            try:
+                                sz = os.path.getsize(full_p)
+                            except OSError:
+                                sz = 0
+                            vol_name = os.path.basename(mount) if mount != "/" else "Drive"
+                            rel_p = os.path.relpath(full_p, mount)
+                            deleted_files.append({
+                                "name": f"{vol_name}/{rel_p}",
+                                "size": self._human_size(sz),
+                                "recoverability": "High"
+                            })
+                            if len(deleted_files) >= 50:
+                                break
+                        if len(deleted_files) >= 50:
+                            break
+                except (PermissionError, OSError):
+                    continue
+                if len(deleted_files) >= 50:
+                    break
+
+        return deleted_files
+
     def _probe_macos(self) -> List[Dict[str, Any]]:
         """Probe real physical storage drives using macOS diskutil plist API. NO FAKE DATA."""
         try:
@@ -546,12 +636,8 @@ class WipeEngine:
             # currentFiles = REAL volume summary + real top-level entries — NO fake sample files
             current_files = usage.get("currentFilesEntries", [])
 
-            # deletedRecoverableFiles = forensic disclaimer — never fake samples
-            deleted_recoverable = []
-            if not is_already_clean and usage["fileCountEstimate"] > 0:
-                # Best-effort warning based on real volume age / deleted blocks info not available without root
-                # We only add a single informational entry that forensic scan would be required
-                pass
+            # deletedRecoverableFiles = scan real trash/deleted directories
+            deleted_recoverable = self._find_recoverable_deleted_files(usage["mountedPaths"], is_already_clean)
 
             clean_model = (info.get("IORegistryEntryName") or media_name or f"Storage Drive ({disk})").replace(" Media", "").strip()
             devices.append({
@@ -828,7 +914,8 @@ class WipeEngine:
                 except Exception:
                     pass
 
-            deleted_recoverable = []
+            mounted_paths_linux = [mp for mp, _, _ in child_mounts]
+            deleted_recoverable = self._find_recoverable_deleted_files(mounted_paths_linux, is_already_clean)
 
             dev_id = f"dev-{name}" if name else f"dev-{serial[:8].lower()}"
 
@@ -952,7 +1039,7 @@ class WipeEngine:
                             "capacityUsedPct": 0.0,
                             "isAlreadyClean": False,
                             "currentFiles": current_files,
-                            "deletedRecoverableFiles": [],
+                            "deletedRecoverableFiles": self._find_recoverable_deleted_files(child_mounts, False),
                             "volumeInfo": [{"name": m, "mount": m, "size": size_bytes} for m in child_mounts],
                             "mountedPaths": child_mounts
                         })
@@ -1518,6 +1605,7 @@ class WipeEngine:
                 database.update_wipe_progress(wipe_id, 65, "IN_PROGRESS", "Flushing", "Zero-filling unallocated sectors...")
                 fill_path = os.path.join(mount_point, f".__wipex_free_space_zero.tmp")
                 try:
+<<<<<<< HEAD
                     with open(fill_path, "wb") as fill_f:
                         zero_block = b'\x00' * (2 * 1024 * 1024)  # 2MB
                         fill_written = 0
@@ -1538,6 +1626,10 @@ class WipeEngine:
                             os.fsync(fill_f.fileno())
                         except Exception:
                             pass
+=======
+                    subprocess.run(["diskutil", "unmountDisk", "force", f"/dev/{disk_id}"], capture_output=True, timeout=10)
+                    subprocess.run(["diskutil", "eraseDisk", "FAT32", "WIPEX", f"/dev/{disk_id}"], capture_output=True, timeout=30)
+>>>>>>> 67b53c0 (final logic fix maybe)
                 except Exception:
                     pass
                 finally:

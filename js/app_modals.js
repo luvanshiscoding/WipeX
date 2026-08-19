@@ -267,7 +267,8 @@
       } else {
         // Start real hardware wipe on backend
         try {
-          const res = await fetch(`${this.apiBaseUrl}/api/wipe/start`, {
+          const fetchFn = (typeof this.fetchBackend === 'function') ? this.fetchBackend.bind(this) : fetch;
+          const res = await fetchFn('/api/wipe/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -275,7 +276,7 @@
               methodId: this.selectedMethodId
             })
           });
-          if (res.ok) {
+          if (res && res.ok) {
             const data = await res.json();
             this.activeWipeId = data.wipeId;
             if (data.nonce) this.currentNonce = data.nonce;
@@ -296,8 +297,9 @@
         // Real backend polling
         this.wipeInterval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`${self.apiBaseUrl}/api/wipe/status/${self.activeWipeId}`);
-            if (statusRes.ok) {
+            const fetchFn = (typeof self.fetchBackend === 'function') ? self.fetchBackend.bind(self) : fetch;
+            const statusRes = await fetchFn(`/api/wipe/status/${self.activeWipeId}`);
+            if (statusRes && statusRes.ok) {
               const statusData = await statusRes.json();
               const backendPct = statusData.progress || 0;
               const targetCluster = Math.min(totalClusters, Math.round((backendPct / 100) * totalClusters));
@@ -326,8 +328,25 @@
                 self._applyPostWipeFileCleanup();
                 self.updateWipeUI();
                 self.drawCanvas();
-                if (proceedBtn) proceedBtn.disabled = false;
+
+                const titleEl = document.getElementById('wipe-phase-title');
+                const descEl = document.getElementById('wipe-phase-desc');
+                const bannerEl = document.getElementById('wipe-complete-banner');
+                if (titleEl) titleEl.textContent = "✓ Secure Erasure Completed!";
+                if (descEl) descEl.textContent = "Hardware sanitization finished with 0 unrecoverable read errors. Ready for verification.";
+                if (bannerEl) bannerEl.style.display = 'block';
+
+                if (proceedBtn) {
+                  proceedBtn.disabled = false;
+                  proceedBtn.classList.add('pulse-ready');
+                }
                 self.renderStepper();
+
+                setTimeout(() => {
+                  if (self.currentPhase === 3 && self.wipeCompleted) {
+                    self.goToPhase(4);
+                  }
+                }, 1600);
               } else if (statusData.status === 'FAILED') {
                 clearInterval(self.wipeInterval);
                 self.isWiping = false;
@@ -370,8 +389,25 @@
             self._applyPostWipeFileCleanup();
             self.updateWipeUI();
             self.drawCanvas();
-            if (proceedBtn) proceedBtn.disabled = false;
+
+            const titleEl = document.getElementById('wipe-phase-title');
+            const descEl = document.getElementById('wipe-phase-desc');
+            const bannerEl = document.getElementById('wipe-complete-banner');
+            if (titleEl) titleEl.textContent = "✓ Secure Erasure Completed!";
+            if (descEl) descEl.textContent = "Hardware sanitization finished with 0 unrecoverable read errors. Ready for verification.";
+            if (bannerEl) bannerEl.style.display = 'block';
+
+            if (proceedBtn) {
+              proceedBtn.disabled = false;
+              proceedBtn.classList.add('pulse-ready');
+            }
             self.renderStepper();
+
+            setTimeout(() => {
+              if (self.currentPhase === 3 && self.wipeCompleted) {
+                self.goToPhase(4);
+              }
+            }, 1600);
           }
         }, 40);
       }

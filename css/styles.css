@@ -2161,3 +2161,25 @@ body:not(.demo-mode-active) .demo-only-feature {
     color: #000000 !important;
   }
 }
+
+/* Pulsing Next button indicator when wipe completes */
+@keyframes pulseReadyGlow {
+  0% {
+    box-shadow: 0 0 5px rgba(0, 240, 255, 0.4), 0 0 10px rgba(0, 255, 136, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.8), 0 0 30px rgba(0, 255, 136, 0.5);
+    transform: scale(1.03);
+  }
+  100% {
+    box-shadow: 0 0 5px rgba(0, 240, 255, 0.4), 0 0 10px rgba(0, 255, 136, 0.2);
+    transform: scale(1);
+  }
+}
+
+.pulse-ready {
+  animation: pulseReadyGlow 1.5s infinite ease-in-out !important;
+  border: 1px solid var(--cyan-neon) !important;
+}
+

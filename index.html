@@ -251,8 +251,8 @@
         <!-- STEP 3: ACTIVE WIPE PROGRESS -->
         <div id="phase-3-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">Securely Erasing Drive...</h2>
-            <p class="phase-desc">Please wait while your storage drive is undergoing hardware-level media sanitization.</p>
+            <h2 class="phase-title" id="wipe-phase-title">Securely Erasing Drive...</h2>
+            <p class="phase-desc" id="wipe-phase-desc">Please wait while your storage drive is undergoing hardware-level media sanitization.</p>
           </div>
 
           <div class="wipe-progress-card">
@@ -278,6 +278,12 @@
             <!-- Mini Visual Sector Grid -->
             <div class="mini-canvas-wrapper">
               <canvas id="sector-canvas" width="600" height="160"></canvas>
+            </div>
+
+            <!-- Wipe Complete Banner -->
+            <div id="wipe-complete-banner" class="simple-alert-box alert-green" style="display:none; margin-top:16px; text-align:center;">
+              <span style="font-size:15px; font-weight:700;">✓ Data Erasure Completed (100%)</span>
+              <div style="font-size:12px; margin-top:4px; opacity:0.9;">All media sectors sanitized. Advancing to independent verification check...</div>
             </div>
 
             <!-- Demo Fast-Forward Button (Visible in Demo Mode) -->

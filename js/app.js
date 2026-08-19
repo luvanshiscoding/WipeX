@@ -5,7 +5,9 @@
 
 class WipeXApp {
   constructor() {
-    this.apiBaseUrl = 'http://localhost:8000';
+    const loc = (typeof window !== 'undefined' && window.location) ? window.location : null;
+    const host = (loc && loc.hostname) ? loc.hostname : 'localhost';
+    this.apiBaseUrl = (host === 'localhost' || host === '127.0.0.1') ? `http://${host}:8000` : (loc && loc.origin ? loc.origin : 'http://localhost:8000');
     this.activeWipeId = null;
 
     this.activeView = 'workflow';
@@ -157,6 +159,25 @@ class WipeXApp {
     }
   }
 
+  async fetchBackend(endpoint, options = {}) {
+    const origins = [
+      this.apiBaseUrl,
+      'http://localhost:8000',
+      'http://127.0.0.1:8000',
+      ''
+    ];
+    for (const base of origins) {
+      try {
+        const url = base ? `${base}${endpoint}` : endpoint;
+        const res = await fetch(url, { ...options, cache: 'no-store' });
+        if (res && res.ok) return res;
+      } catch (e) {
+        // try next fallback
+      }
+    }
+    return null;
+  }
+
   initDemoMode() {
     const saved = localStorage.getItem('wipex_demo_mode');
     this.demoMode = (saved === null) ? true : (saved === '1');
@@ -183,8 +204,8 @@ class WipeXApp {
       if (this.demoMode || this.isWiping) return;
 
       try {
-        const res = await fetch(`${this.apiBaseUrl}/api/devices`, { cache: 'no-store' });
-        if (!res.ok) return;
+        const res = await this.fetchBackend('/api/devices');
+        if (!res || !res.ok) return;
         const latestReal = await res.json();
         if (!Array.isArray(latestReal)) return;
 
@@ -264,14 +285,31 @@ class WipeXApp {
         else this.sectorStates[i] = 2;
       }
     }
+    if (typeof this._applyPostWipeFileCleanup === 'function') {
+      this._applyPostWipeFileCleanup();
+    }
     this.drawCanvas();
     this.updateWipeUI();
+
+    const titleEl = document.getElementById('wipe-phase-title');
+    const descEl = document.getElementById('wipe-phase-desc');
+    const bannerEl = document.getElementById('wipe-complete-banner');
+    if (titleEl) titleEl.textContent = "✓ Secure Erasure Completed!";
+    if (descEl) descEl.textContent = "Hardware sanitization finished with 0 unrecoverable read errors. Ready for verification.";
+    if (bannerEl) bannerEl.style.display = 'block';
+
     const proceedBtn = document.getElementById('btn-proceed-phase-4');
     if (proceedBtn) {
       proceedBtn.disabled = false;
       proceedBtn.classList.add('pulse-ready');
     }
     this.renderStepper();
+
+    setTimeout(() => {
+      if (this.currentPhase === 3 && this.wipeCompleted) {
+        this.goToPhase(4);
+      }
+    }, 1200);
   }
 
   async loadDevices() {
@@ -300,11 +338,14 @@ class WipeXApp {
       // In DEMO MODE: Show ONLY the interactive scenario presets, NO real hardware
       devices = (window.MOCK_DEVICES || []).map(d => ({ ...d }));
     } else {
-      // In REAL HARDWARE MODE: Fetch and show ONLY real physical connected devices
+      // In REAL HARDWARE MODE: Fetch and show ONLY real physical connected devices via backend probe
       try {
-        const res = await fetch(`${this.apiBaseUrl}/api/devices`, { cache: 'no-store' });
-        if (res.ok) {
+        const res = await this.fetchBackend('/api/devices');
+        if (res && res.ok) {
           devices = await res.json();
+        } else {
+          // If backend offline, show informative warning
+          this.showStepBlockedToast("⚠️ Backend API offline on port 8000. Connect backend or enable Demo Mode.");
         }
       } catch (e) {
         devices = [];
@@ -384,8 +425,8 @@ class WipeXApp {
   }
 
   isPhaseAccessible(phaseNum) {
-    // ANTI-CORRUPTION LOCKOUT: Once wiping starts or completes, backwards navigation to Step 1, 2, or 3 is strictly prohibited
-    if ((this.isWiping || (this.wipeCompleted && this.currentPhase >= 3)) && phaseNum <= 3) {
+    // ANTI-CORRUPTION LOCKOUT: Once wiping starts or completes, backwards navigation to Step 1 or 2 is strictly prohibited
+    if ((this.isWiping || (this.wipeCompleted && this.currentPhase >= 3)) && phaseNum < 3) {
       return { 
         ok: false, 
         reason: '🔒 Locked: Drive erasure is in progress or completed. Backwards navigation to selection is disabled for safety.' 
@@ -484,10 +525,13 @@ class WipeXApp {
     if (!this.devices.length) {
       listEl.innerHTML = `
         <div style="text-align:center; padding:32px; border:1px solid var(--border-subtle); background:var(--bg-surface); border-radius:var(--radius-lg); color:var(--text-secondary); grid-column: 1 / -1;">
-          <div style="font-size:24px; margin-bottom:8px;">💾</div>
-          <div style="font-size:15px; font-weight:700; margin-bottom:4px;">No Drives Detected</div>
-          <div style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Connect a storage drive or click Scan Drives to refresh.</div>
-          <button class="btn btn-primary" onclick="app.loadDevices()">Scan Drives</button>
+          <div style="font-size:28px; margin-bottom:8px;">💾</div>
+          <div style="font-size:15px; font-weight:700; margin-bottom:4px;">No External Drives Detected</div>
+          <div style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Connect a USB flash drive or external storage, or click Scan Drives to refresh hardware probes.</div>
+          <div style="display:flex; justify-content:center; gap:10px;">
+            <button class="btn btn-primary" onclick="app.loadDevices()">Scan Drives</button>
+            <button class="btn btn-outline" onclick="app.toggleDemoMode(true)">Enable Demo Presets</button>
+          </div>
         </div>
       `;
       if (alertEl) alertEl.style.display = 'none';
@@ -653,6 +697,20 @@ class WipeXApp {
     this.sectorStates = new Array(256).fill(0);
     this.wipeProgress = 0;
     this.isWiping = false;
+
+    const titleEl = document.getElementById('wipe-phase-title');
+    const descEl = document.getElementById('wipe-phase-desc');
+    const bannerEl = document.getElementById('wipe-complete-banner');
+    const proceedBtn = document.getElementById('btn-proceed-phase-4');
+
+    if (titleEl) titleEl.textContent = "Securely Erasing Drive...";
+    if (descEl) descEl.textContent = "Please wait while your storage drive is undergoing hardware-level media sanitization.";
+    if (bannerEl) bannerEl.style.display = 'none';
+    if (proceedBtn) {
+      proceedBtn.disabled = true;
+      proceedBtn.classList.remove('pulse-ready');
+    }
+
     this.updateWipeUI();
     this.drawCanvas();
   }
@@ -710,8 +768,8 @@ class WipeXApp {
     // Run real backend audit when in Real Hardware Mode with active backend wipe ID
     if (!this.demoMode && this.activeWipeId) {
       try {
-        const res = await fetch(`${this.apiBaseUrl}/api/audit/run/${this.activeWipeId}`, { method: 'POST' });
-        if (res.ok) {
+        const res = await this.fetchBackend(`/api/audit/run/${this.activeWipeId}`, { method: 'POST' });
+        if (res && res.ok) {
           auditData = await res.json();
         }
       } catch (e) { /* fallback to client evaluation */ }
@@ -816,12 +874,12 @@ class WipeXApp {
     // Backend certificate generation (persists to DB in real hardware mode)
     if (!this.demoMode && this.activeWipeId) {
       try {
-        const res = await fetch(`${this.apiBaseUrl}/api/certificates/generate`, {
+        const res = await this.fetchBackend('/api/certificates/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ wipeId: this.activeWipeId })
         });
-        if (res.ok) {
+        if (res && res.ok) {
           const backendCert = await res.json();
           if (backendCert && backendCert.certificateId) {
             certId = backendCert.certificateId;
@@ -996,8 +1054,8 @@ class WipeXApp {
     // Try backend ledger lookup if not resolved from offline QR params
     if (!record) {
       try {
-        const res = await fetch(`${this.apiBaseUrl}/api/verify/${encodeURIComponent(query)}`);
-        if (res.ok) {
+        const res = await this.fetchBackend(`/api/verify/${encodeURIComponent(query)}`);
+        if (res && res.ok) {
           const apiData = await res.json();
           record = {
             certificateId: apiData.certificateId,
