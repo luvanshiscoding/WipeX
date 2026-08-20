@@ -177,8 +177,8 @@ class WipeXApp {
   startAutoDetection() {
     if (this._autoDetectTimer) clearInterval(this._autoDetectTimer);
     this._autoDetectTimer = setInterval(async () => {
-      // Auto-detection runs when in Real Hardware mode (demoMode is OFF) and not actively wiping
-      if (this.demoMode || this.isWiping) return;
+      // Auto-detection runs only on Step 1 when in Real Hardware mode (demoMode is OFF) and not actively wiping
+      if (this.demoMode || this.isWiping || this.wipeCompleted || this.currentPhase > 1) return;
 
       try {
         const res = await this.fetchBackend('/api/devices');

@@ -105,9 +105,11 @@ class EntropyAuditor:
         for mp in mounted_paths:
             if not os.path.exists(mp) or mp in ("/", "/System", "/private", "/usr", "/bin", "C:\\", "C:\\Windows"):
                 continue
-            for root, _, files in os.walk(mp):
+            for root, dirs, files in os.walk(mp):
+                # Ignore hidden OS metadata folders
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("$RECYCLE.BIN", "LOST.DIR", "System Volume Information")]
                 for f in files:
-                    if f in (".DS_Store", ".fseventsd", ".Spotlight-V100", ".TemporaryItems", "desktop.ini", "Thumbs.db"):
+                    if f.startswith(".") or f.startswith("._") or f in (".DS_Store", ".fseventsd", ".Spotlight-V100", ".TemporaryItems", "desktop.ini", "Thumbs.db", ".VolumeIcon.icns"):
                         continue
                     fp = os.path.join(root, f)
                     try:
