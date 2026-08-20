@@ -42,8 +42,7 @@ class WipeXApp {
       2: false,
       3: false,
       4: false,
-      5: false,
-      6: false
+      5: false
     };
 
     this.simpleMethods = [
@@ -57,17 +56,6 @@ class WipeXApp {
         speedBadge: "Fast (5-10 mins)",
         securityBadge: "Standard Security",
         recommendedFor: "General / Non-Sensitive Media"
-      },
-      {
-        id: "nist-800-88-purge",
-        name: "NIST 800-88 Full Purge",
-        standard: "NIST SP 800-88",
-        tier: "Enterprise Compliance Tier",
-        fullName: "NIST SP 800-88 Rev. 1 Full Lifecycle (Clear + Verify + Purge)",
-        oneLine: "Industry standard 3-stage lifecycle: 0x00 overwrite, sector verification, and cryptographic/purge erase.",
-        speedBadge: "Medium (10-15 mins)",
-        securityBadge: "Highest Security",
-        recommendedFor: "Enterprise Compliance"
       },
       {
         id: "purge-nvme-crypto",
@@ -90,17 +78,6 @@ class WipeXApp {
         speedBadge: "Fast (3-5 mins)",
         securityBadge: "High Security",
         recommendedFor: "SATA SSD"
-      },
-      {
-        id: "three-pass",
-        name: "Three Pass Overwrite",
-        standard: "3-Pass Overwrite",
-        tier: "Multi-Pass Overwrite Tier",
-        fullName: "General-Purpose 3-Pass Overwrite (Zeros, Ones, Random)",
-        oneLine: "Sequential multi-pass overwrite with binary zeros, ones, and cryptographic random data.",
-        speedBadge: "Standard (15-30 mins)",
-        securityBadge: "High Security",
-        recommendedFor: "USB / General Storage"
       },
       {
         id: "dod-3pass",
@@ -215,13 +192,19 @@ class WipeXApp {
         const added = latestReal.filter(d => !currentKeys.has(d.devicePath || d.id));
         const removed = (this.devices || []).filter(d => !latestKeys.has(d.devicePath || d.id));
 
-        if (added.length > 0 || removed.length > 0) {
+        if (added.length > 0 || removed.length > 0 || ((!this.devices || this.devices.length === 0) && latestReal.length > 0)) {
           this.devices = latestReal;
 
           if (added.length > 0) {
             const newDev = added[0];
             this.showStepBlockedToast(`💾 Drive Connected: ${newDev.model} (${newDev.capacity ? newDev.capacity.split('(')[0].trim() : ''})`);
+            this.renderDeviceList();
             this.selectDevice(newDev.id);
+            if (typeof this.renderDriveStatus === 'function') this.renderDriveStatus();
+            this.updatePhase1ContinueBtn();
+            this.renderStorageBar();
+            this.renderMethodOptions();
+            this.renderStepper();
           } else if (removed.length > 0) {
             const remDev = removed[0];
             this.showStepBlockedToast(`⚠️ Drive Disconnected: ${remDev.model}`);
@@ -234,12 +217,17 @@ class WipeXApp {
             this.renderStorageBar();
             this.renderMethodOptions();
             this.renderStepper();
+          } else if (this.devices.length > 0 && !this.selectedDevice) {
+            this.selectedDevice = this.devices[0];
+            this.renderDeviceList();
+            if (typeof this.renderDriveStatus === 'function') this.renderDriveStatus();
+            this.updatePhase1ContinueBtn();
           }
         }
       } catch (e) {
         // Background polling silent failure
       }
-    }, 2500);
+    }, 2000);
   }
 
   selectDeviceById(deviceId) {
@@ -434,12 +422,11 @@ class WipeXApp {
     }
 
     if (phaseNum <= this.currentPhase) return { ok: true };
-    if (phaseNum > 6 || phaseNum < 1) return { ok: false, reason: 'Invalid step' };
+    if (phaseNum > 5 || phaseNum < 1) return { ok: false, reason: 'Invalid step' };
     if (!this.phaseCompleted[1]) return { ok: false, reason: 'Step 1 required: Select a drive first' };
     if (phaseNum >= 3 && !this.phaseCompleted[2]) return { ok: false, reason: 'Step 2 required: Choose a sanitization method first' };
     if (phaseNum >= 4 && !this.phaseCompleted[3]) return { ok: false, reason: 'Step 3 required: Complete the wipe before verifying' };
     if (phaseNum >= 5 && !this.phaseCompleted[4]) return { ok: false, reason: 'Step 4 required: Complete verification first' };
-    if (phaseNum >= 6 && !this.phaseCompleted[5]) return { ok: false, reason: 'Step 5 required: View safety score before certificate' };
     return { ok: true };
   }
 
@@ -459,9 +446,8 @@ class WipeXApp {
       { num: 1, title: "Select Drive" },
       { num: 2, title: "Choose Method" },
       { num: 3, title: "Erase Data" },
-      { num: 4, title: "Verify" },
-      { num: 5, title: "Safety Score" },
-      { num: 6, title: "Certificate" }
+      { num: 4, title: "Verify & Safety" },
+      { num: 5, title: "Certificate" }
     ];
 
     stepperEl.innerHTML = phases.map(p => {
@@ -486,7 +472,7 @@ class WipeXApp {
   }
 
   goToPhase(phaseNum) {
-    if (phaseNum < 1 || phaseNum > 6) return;
+    if (phaseNum < 1 || phaseNum > 5) return;
 
     const access = this.isPhaseAccessible(phaseNum);
     if (!access.ok) {
@@ -511,8 +497,7 @@ class WipeXApp {
     else if (phaseNum === 2) { this.renderMethodOptions(); this.phaseCompleted[2] = !!this.selectedMethodId; }
     else if (phaseNum === 3) this.resetWipeCanvas();
     else if (phaseNum === 4) { this.renderVerification(); this.phaseCompleted[4] = true; }
-    else if (phaseNum === 5) { this.renderTrustScore(); this.phaseCompleted[5] = true; }
-    else if (phaseNum === 6) this.renderCertificate();
+    else if (phaseNum === 5) { this.renderCertificate(); this.phaseCompleted[5] = true; }
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -621,7 +606,6 @@ class WipeXApp {
     this.phaseCompleted[3] = false;
     this.phaseCompleted[4] = false;
     this.phaseCompleted[5] = false;
-    this.phaseCompleted[6] = false;
     this.selectedMethodId = null; // Require user to select a method in Step 2
 
     this.renderDeviceList();
@@ -754,7 +738,7 @@ class WipeXApp {
       }
     }
   }
-  /* STEP 4: VERIFICATION */
+  /* STEP 4: VERIFICATION & SAFETY VERDICT */
   async renderVerification() {
     const card = document.getElementById('verification-result-card');
     const title = document.getElementById('verify-title');
@@ -803,25 +787,21 @@ class WipeXApp {
         `;
       }
     }
-  }
 
-  /* STEP 5: TRUST SCORE */
-  renderTrustScore() {
-    if (!this.selectedDevice) return;
+    // Merged Safety Assessment & Reuse Recommendation (Integrated into Step 4)
     const outcome = this.selectedDevice.expectedOutcome;
-
     document.getElementById('light-green')?.classList.toggle('active', outcome === 'GREEN');
     document.getElementById('light-red')?.classList.toggle('active', outcome === 'RED');
 
-    const titleEl = document.getElementById('score-rating-title');
-    const descEl = document.getElementById('score-rating-desc');
-    const btnLabel = document.getElementById('phase-6-btn-label');
-    const diagActionEl = document.getElementById('step-5-diag-action');
+    const scoreTitleEl = document.getElementById('score-rating-title');
+    const scoreDescEl = document.getElementById('score-rating-desc');
+    const btnLabel = document.getElementById('phase-5-btn-label');
+    const diagActionEl = document.getElementById('step-4-diag-action');
 
-    if (outcome === 'RED') {
-      if (titleEl) { titleEl.textContent = "DAMAGED DRIVE — MUST BE SHREDDED"; titleEl.className = "score-main-title text-red"; }
-      if (descEl) descEl.textContent = "Damaged sectors were detected. Software cannot erase physically broken areas. To prevent data leaks, this drive must be physically shredded.";
-      if (btnLabel) btnLabel.textContent = "View Destruction Notice";
+    if (outcome === 'RED' || isAuditFailed) {
+      if (scoreTitleEl) { scoreTitleEl.textContent = "DAMAGED DRIVE — MUST BE SHREDDED"; scoreTitleEl.className = "score-main-title text-red"; }
+      if (scoreDescEl) scoreDescEl.textContent = "Damaged sectors were detected. Software cannot erase physically broken areas. To prevent data leaks, this drive must be physically shredded.";
+      if (btnLabel) btnLabel.textContent = "Next: View Destruction Notice";
       if (diagActionEl) {
         diagActionEl.innerHTML = `
           <button type="button" class="btn btn-chip" style="background:rgba(255,51,102,0.15); border-color:var(--red-border); color:var(--red-neon); padding:8px 18px; font-weight:700;" onclick="app.openDiagnosticsModal()">
@@ -830,14 +810,14 @@ class WipeXApp {
         `;
       }
     } else {
-      if (titleEl) { titleEl.textContent = "SAFE TO REUSE OR RESELL"; titleEl.className = "score-main-title text-emerald"; }
-      if (descEl) descEl.textContent = "100% of data has been permanently erased. The drive is in healthy condition and completely safe to reuse, donate, or resell.";
-      if (btnLabel) btnLabel.textContent = "View & Print Certificate";
+      if (scoreTitleEl) { scoreTitleEl.textContent = "SAFE TO REUSE OR RESELL"; scoreTitleEl.className = "score-main-title text-emerald"; }
+      if (scoreDescEl) scoreDescEl.textContent = "100% of data has been permanently erased. The drive is in healthy condition and completely safe to reuse, donate, or resell.";
+      if (btnLabel) btnLabel.textContent = "Next: View Official Certificate";
       if (diagActionEl) diagActionEl.innerHTML = '';
     }
   }
 
-  /* STEP 7: CERTIFICATE */
+  /* STEP 5: OFFICIAL CERTIFICATE */
   async renderCertificate() {
     if (!this.selectedDevice) return;
     const dev = this.selectedDevice;
@@ -846,7 +826,7 @@ class WipeXApp {
     // Generate slug from real model name
     let modelSlug = dev.model.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').substring(0, 12).replace(/-$/, '');
 
-    // Uncrackable, high-entropy 64-bit random hexadecimal suffix (2.81 x 10^14 space)
+    // High-entropy random hexadecimal suffix
     const randomHex = (window.crypto && window.crypto.getRandomValues)
       ? Array.from(window.crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('').toUpperCase()
       : Math.random().toString(16).substring(2, 14).toUpperCase();
@@ -912,7 +892,7 @@ class WipeXApp {
       verdict: isRed ? "Drive contains damaged sectors and must be physically shredded." : "Authentic & Verified. 100% of data was securely erased."
     };
 
-    // Banner
+    // Banner & Watermark (Formal Black & White)
     const banner = document.getElementById('cert-status-banner');
     const bannerIcon = document.getElementById('banner-icon');
     const bannerHeadline = document.getElementById('banner-headline');
@@ -922,59 +902,71 @@ class WipeXApp {
 
     if (banner) {
       if (!isRed) {
-        banner.className = "cert-status-banner banner-green";
-        if (bannerIcon) bannerIcon.textContent = "✓";
+        if (bannerIcon) bannerIcon.textContent = "[ ✓ ]";
         if (bannerHeadline) bannerHeadline.textContent = "DRIVE STATUS: 100% CLEANED & SANITIZED";
         if (bannerSubtext) bannerSubtext.textContent = "Zero recoverable data detected. Drive is verified clean and safe for reuse or resale.";
         if (bannerTag) bannerTag.textContent = "PASSED";
         if (watermark) watermark.textContent = "VERIFIED CLEAN";
       } else {
-        banner.className = "cert-status-banner banner-red";
-        if (bannerIcon) bannerIcon.textContent = "🚨";
-        if (bannerHeadline) bannerHeadline.textContent = "DRIVE STATUS: NOT CLEANED · PHYSICAL FAULT";
+        if (bannerIcon) bannerIcon.textContent = "[ ⚠ ]";
+        if (bannerHeadline) bannerHeadline.textContent = "DRIVE STATUS: NOT CLEANED · PHYSICAL DEFECTS";
         if (bannerSubtext) bannerSubtext.textContent = "Damaged sectors could not be wiped. Physical mechanical destruction is mandated.";
-        if (bannerTag) bannerTag.textContent = "SHRED REQUIRED";
+        if (bannerTag) bannerTag.textContent = "SHRED ORDER";
         if (watermark) watermark.textContent = "SHRED ORDER";
       }
     }
 
-    document.getElementById('cert-id-val').textContent = certId;
-    document.getElementById('cert-timestamp-val').textContent = timestamp;
-    document.getElementById('cert-model').textContent = dev.model;
-    document.getElementById('cert-serial').textContent = dev.serialNumber;
-    document.getElementById('cert-capacity').textContent = dev.capacity.split('(')[0].trim();
-    document.getElementById('cert-drive-type').textContent = dev.type;
-    document.getElementById('cert-method-used').textContent = displayMethod;
+    const idEl = document.getElementById('cert-id-val');
+    if (idEl) idEl.textContent = certId;
+
+    const timeEl = document.getElementById('cert-timestamp-val');
+    if (timeEl) timeEl.textContent = timestamp;
+
+    const modelEl = document.getElementById('cert-model');
+    if (modelEl) modelEl.textContent = dev.model;
+
+    const serialEl = document.getElementById('cert-serial');
+    if (serialEl) serialEl.textContent = dev.serialNumber;
+
+    const capEl = document.getElementById('cert-capacity');
+    if (capEl) capEl.textContent = dev.capacity.split('(')[0].trim();
+
+    const typeEl = document.getElementById('cert-drive-type');
+    if (typeEl) typeEl.textContent = dev.type;
+
+    const methodEl = document.getElementById('cert-method-used');
+    if (methodEl) methodEl.textContent = displayMethod;
+
     const nonceEl = document.getElementById('cert-nonce-val');
     if (nonceEl) nonceEl.textContent = this.currentNonce || '—';
 
     const cleanStatusEl = document.getElementById('cert-cleaned-status');
     if (cleanStatusEl) {
       cleanStatusEl.textContent = cleanedStatusText;
-      cleanStatusEl.className = isRed ? "text-red font-bold" : "text-emerald font-bold";
     }
 
     const auditResEl = document.getElementById('cert-audit-res');
     if (auditResEl) {
       auditResEl.textContent = auditText;
-      auditResEl.className = isRed ? "text-red font-bold" : "text-emerald font-bold";
     }
 
     const scoreLabelEl = document.getElementById('cert-score-label');
     if (scoreLabelEl) {
       scoreLabelEl.textContent = reuseScoreText;
-      scoreLabelEl.className = isRed ? "text-red font-bold" : "text-emerald font-bold";
     }
 
-    document.getElementById('cert-sha256').textContent = sha256Hash;
+    const shaEl = document.getElementById('cert-sha256');
+    if (shaEl) shaEl.textContent = sha256Hash;
 
-    // Direct offline verifiable decentralized QR code payload
+    // Compact RFC-compliant verification URL for instant mobile & camera QR scan
     const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'https://wipex.app';
-    const qrUrl = `${origin}${window.location.pathname}?verify=${encodeURIComponent(certId)}&sn=${encodeURIComponent(dev.serialNumber)}&mod=${encodeURIComponent(dev.model)}&m=${encodeURIComponent(chosenMethod.name)}&std=${encodeURIComponent(chosenMethod.standard)}&ts=${encodeURIComponent(timestamp)}&res=${encodeURIComponent(dev.expectedOutcome)}&nonce=${encodeURIComponent(this.currentNonce)}&sig=${encodeURIComponent(sha256Hash)}`;
+    const qrUrl = `${origin}${window.location.pathname}?verify=${encodeURIComponent(certId)}`;
 
     const qrContainer = document.getElementById('cert-qr-container');
     const qrHelper = window.WipeXQR || window.AegisQR;
-    qrHelper.renderQR(qrContainer, qrUrl);
+    if (qrHelper && qrContainer) {
+      qrHelper.renderQR(qrContainer, qrUrl);
+    }
   }
 
   printCertificate() {
@@ -1352,8 +1344,7 @@ class WipeXApp {
       2: false,
       3: false,
       4: false,
-      5: false,
-      6: false
+      5: false
     };
 
     // Generate fresh nonce for next wipe

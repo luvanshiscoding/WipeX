@@ -323,30 +323,44 @@
     renderQR: function (containerElement, text) {
       if (!containerElement || !text) return;
 
-      try {
-        const builder = new QRCodeBuilder(text);
+      // Ensure URL is compact to fit in high-contrast QR Matrix
+      let targetText = String(text).trim();
+
+      const tryRender = (dataStr) => {
+        const builder = new QRCodeBuilder(dataStr);
         const matrix = builder.build();
         const size = matrix.length;
-        const cellSize = 5;
-        const padding = 10;
+        const cellSize = size > 40 ? 3 : (size > 30 ? 4 : 5);
+        const padding = 8;
         const svgDim = size * cellSize + padding * 2;
 
         let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgDim} ${svgDim}" width="100%" height="100%" shape-rendering="crispEdges">`;
-        svg += `<rect width="${svgDim}" height="${svgDim}" fill="#ffffff" rx="4"/>`;
+        svg += `<rect width="${svgDim}" height="${svgDim}" fill="#ffffff" rx="2"/>`;
 
         for (let r = 0; r < size; r++) {
           for (let c = 0; c < size; c++) {
             if (matrix[r][c] === 1) {
               const x = padding + c * cellSize;
               const y = padding + r * cellSize;
-              svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#0b0f19"/>`;
+              svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#0f172a"/>`;
             }
           }
         }
         svg += `</svg>`;
         containerElement.innerHTML = svg;
+      };
+
+      try {
+        tryRender(targetText);
       } catch (err) {
-        console.error("QR Generation error:", err);
+        // Fallback to compact verification parameter if long query string overflowed
+        try {
+          const match = targetText.match(/verify=([^&]+)/);
+          const compact = match ? `${window.location.origin || 'https://wipex.app'}?verify=${match[1]}` : targetText.substring(0, 80);
+          tryRender(compact);
+        } catch (innerErr) {
+          console.error("QR Generation fallback error:", innerErr);
+        }
       }
     }
   };

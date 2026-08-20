@@ -252,7 +252,6 @@
       this.phaseCompleted[3] = false;
       this.phaseCompleted[4] = false;
       this.phaseCompleted[5] = false;
-      this.phaseCompleted[6] = false;
       this.renderStepper();
 
       const cryptoHelper = window.WipeXCrypto || window.AegisCrypto;

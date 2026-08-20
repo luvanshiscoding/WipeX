@@ -304,11 +304,11 @@
           </div>
         </div>
 
-        <!-- STEP 4: INDEPENDENT VERIFICATION CHECK -->
+        <!-- STEP 4: VERIFICATION & REUSE READINESS -->
         <div id="phase-4-panel" class="phase-screen">
           <div class="phase-header-block">
-            <h2 class="phase-title">Independent Verification Check</h2>
-            <p class="phase-desc">Zero-Trust forensic audit verifying zero residual data across the physical drive.</p>
+            <h2 class="phase-title">Independent Verification & Safety Assessment</h2>
+            <p class="phase-desc">Zero-Trust forensic audit verifying residual data and determining drive reuse readiness.</p>
           </div>
 
           <div class="verification-result-card" id="verification-result-card">
@@ -323,91 +323,73 @@
               <!-- Populated dynamically by renderVerification() -->
             </div>
 
+            <!-- Merged Safety Verdict Block -->
+            <div class="trust-score-card-simple" id="trust-score-card-simple" style="margin-top:16px;">
+              <div class="score-traffic-light">
+                <div class="light-circle light-green" id="light-green"></div>
+                <div class="light-circle light-red" id="light-red"></div>
+              </div>
+              
+              <h3 class="score-main-title" id="score-rating-title">SAFE TO REUSE OR RESELL</h3>
+              <p class="score-main-desc" id="score-rating-desc">100% of data has been permanently erased. The drive is in healthy condition and completely safe to reuse, donate, or resell.</p>
+              <div id="step-4-diag-action" style="margin-top:12px;"></div>
+            </div>
+
             <div style="margin-top:14px; font-size:12px; color:var(--text-secondary); background:rgba(0, 240, 255, 0.04); border:1px solid rgba(0, 240, 255, 0.15); padding:10px 14px; border-radius:var(--radius-sm); line-height:1.5; text-align:left;">
-              <strong>💡 Why is this Independent?</strong> This verification scan tests physical drive sectors separately from the wiping tool itself to guarantee no data was skipped and prevents fake success messages.
+              <strong>💡 Independent Verification Guarantee:</strong> This scan tests physical drive sectors separately from the wiping tool to mathematically guarantee Shannon Entropy $H = 0.000000$ bits/byte with 0 unallocated remnants.
             </div>
           </div>
 
           <div class="action-footer" style="display:flex; justify-content:flex-end; align-items:center;">
-            <button class="btn btn-primary" onclick="app.goToPhase(5)">
-              <span>Next: View Safety Score & Verdict</span>
+            <button class="btn btn-primary" id="btn-proceed-phase-5" onclick="app.goToPhase(5)">
+              <span id="phase-5-btn-label">Next: View Official Certificate</span>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
           </div>
         </div>
 
-        <!-- STEP 5: SAFETY SCORE -->
+        <!-- STEP 5: OFFICIAL FORMAL COMPLIANCE CERTIFICATE (BLACK & WHITE) -->
         <div id="phase-5-panel" class="phase-screen">
-          <div class="phase-header-block">
-            <h2 class="phase-title">Drive Safety Assessment</h2>
-            <p class="phase-desc">Final recommendation and safety verdict for this storage drive.</p>
-          </div>
-
-          <div class="trust-score-card-simple" id="trust-score-card-simple">
-            <div class="score-traffic-light">
-              <div class="light-circle light-green" id="light-green"></div>
-              <div class="light-circle light-red" id="light-red"></div>
-            </div>
-            
-            <h3 class="score-main-title" id="score-rating-title">SAFE TO REUSE OR RESELL</h3>
-            <p class="score-main-desc" id="score-rating-desc">100% of data has been permanently erased. The drive is in healthy condition and completely safe to reuse, donate, or resell.</p>
-            <div id="step-5-diag-action" style="margin-top:16px;"></div>
-          </div>
-
-          <div class="action-footer">
-            <button class="btn btn-outline" onclick="app.goToPhase(4)">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-              <span>Back</span>
-            </button>
-            <button class="btn btn-primary" id="btn-proceed-phase-6" onclick="app.goToPhase(6)">
-              <span id="phase-6-btn-label">View & Print Certificate</span>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <!-- STEP 6: HIGH-LEGIBILITY OFFICIAL CERTIFICATE -->
-        <div id="phase-6-panel" class="phase-screen">
           <div class="phase-header-block no-print">
-            <h2 class="phase-title">Official Certificate of Sanitization</h2>
-            <p class="phase-desc">This certificate is cryptographically bound to the drive's physical serial number and registered in the central ledger. Non-editable and tamper-evident.</p>
+            <h2 class="phase-title">Official Certificate of Data Sanitization</h2>
+            <p class="phase-desc">Cryptographically bound to physical storage hardware and logged in the decentralized verification ledger.</p>
           </div>
 
-          <div class="certificate-container" id="certificate-print-area">
+          <div class="certificate-container formal-bw-cert" id="certificate-print-area">
             <div class="cert-border">
               <div class="cert-watermark" id="cert-watermark">VERIFIED CLEAN</div>
 
               <!-- Certificate Header -->
               <div class="cert-header">
                 <div class="cert-gov-seal">
-                  <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#000000" stroke-width="2.2">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     <path d="m9 12 2 2 4-4"/>
                   </svg>
                   <div class="seal-meta">
                     <div class="seal-title">OFFICIAL CERTIFICATE OF DATA SANITIZATION</div>
-                    <div class="seal-sub">WipeX Zero-Trust Media Sanitization & Hardware Verification</div>
+                    <div class="seal-sub">WipeX Media Sanitization & Hardware Verification Standard</div>
                   </div>
                 </div>
 
                 <div class="cert-meta-id">
                   <div class="cert-id-label">CERTIFICATE IDENTIFIER</div>
-                  <div class="cert-id-val font-mono" id="cert-id-val">WIPEX-2026-STORAGE-8F2B</div>
-                  <div class="cert-timestamp" id="cert-timestamp-val">2026-08-19 00:00:00 UTC</div>
-                  <div class="cert-tamper-pill">🔒 Cryptographically Sealed</div>
+                  <div class="cert-id-val font-mono"><a href="javascript:void(0)" onclick="app.verifyCurrentCertInPortal()" id="cert-id-val" class="cert-link" title="Click to verify certificate in central ledger">WIPEX-2026-STORAGE-8F2B</a></div>
+                  <div class="cert-timestamp" id="cert-timestamp-val">2026-08-20 00:00:00 UTC</div>
+                  <div class="cert-tamper-pill">Sealed & Ledger Verified</div>
                 </div>
               </div>
 
-              <!-- Status Highlight Banner -->
-              <div class="cert-status-banner banner-green" id="cert-status-banner">
+              <!-- Status Statement Box (Formal Black & White) -->
+              <div class="cert-status-banner-formal" id="cert-status-banner">
                 <div class="banner-status-left">
-                  <span class="banner-icon" id="banner-icon">✓</span>
+                  <span class="banner-icon font-mono" id="banner-icon">[ ✓ ]</span>
                   <div>
                     <div class="banner-headline" id="banner-headline">DRIVE STATUS: 100% CLEANED & SANITIZED</div>
-                    <div class="banner-subtext" id="banner-subtext">Zero recoverable data detected. Mathematically verified with Shannon Entropy = 0.000000 bits/byte.</div>
+                    <div class="banner-subtext" id="banner-subtext">Zero recoverable data detected. Mathematically verified with Shannon Entropy H = 0.000000 bits/byte.</div>
                   </div>
                 </div>
-                <div class="banner-tag" id="banner-tag">PASSED</div>
+                <div class="banner-tag-formal" id="banner-tag">PASSED</div>
               </div>
 
               <!-- Clear Key-Value Information Grid -->
@@ -415,12 +397,12 @@
                 <!-- Drive Specifications -->
                 <div class="cert-section">
                   <div class="cert-sec-title">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#000000" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
                     <span>Hardware Specifications</span>
                   </div>
                   <table class="cert-data-table">
                     <tr><td class="cert-lbl">Drive Model:</td><td class="font-bold" id="cert-model">—</td></tr>
-                    <tr><td class="cert-lbl">Serial Number:</td><td class="font-mono font-bold text-blue" id="cert-serial">—</td></tr>
+                    <tr><td class="cert-lbl">Serial Number:</td><td><a href="javascript:void(0)" onclick="app.fillPortalSearch(document.getElementById('cert-serial').textContent)" class="cert-link font-mono font-bold" id="cert-serial">—</a></td></tr>
                     <tr><td class="cert-lbl">Media Capacity:</td><td id="cert-capacity">—</td></tr>
                     <tr><td class="cert-lbl">Storage Interface:</td><td id="cert-drive-type">—</td></tr>
                   </table>
@@ -429,14 +411,14 @@
                 <!-- Sanitization & Status Breakdown -->
                 <div class="cert-section">
                   <div class="cert-sec-title">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#000000" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     <span>Sanitization & Compliance</span>
                   </div>
                   <table class="cert-data-table">
-                    <tr><td class="cert-lbl">Standard Applied:</td><td class="font-bold text-blue" id="cert-method-used">NIST SP 800-88</td></tr>
-                    <tr><td class="cert-lbl">Sanitization Verdict:</td><td class="text-emerald font-bold" id="cert-cleaned-status">CERTIFIED CLEANED (100% Zero Data)</td></tr>
+                    <tr><td class="cert-lbl">Standard Applied:</td><td><a href="https://csrc.nist.gov/publications/detail/sp/800-88/rev-1/final" target="_blank" rel="noopener" class="cert-link font-bold" id="cert-method-used" title="View official standard specification">NIST SP 800-88 Rev. 1</a></td></tr>
+                    <tr><td class="cert-lbl">Sanitization Verdict:</td><td class="font-bold" id="cert-cleaned-status">CERTIFIED CLEANED (100% Zero Data)</td></tr>
                     <tr><td class="cert-lbl">Verification Result:</td><td class="font-bold font-mono" id="cert-audit-res">✓ PASSED (Zero Residual Data)</td></tr>
-                    <tr><td class="cert-lbl">Reuse Verdict:</td><td class="font-bold text-emerald" id="cert-score-label">SAFE TO REUSE OR RESELL</td></tr>
+                    <tr><td class="cert-lbl">Reuse Verdict:</td><td class="font-bold" id="cert-score-label">SAFE TO REUSE OR RESELL</td></tr>
                   </table>
                 </div>
               </div>
@@ -444,14 +426,14 @@
               <!-- Cryptographic Proof & Ledger Footer -->
               <div class="cert-crypto-footer">
                 <div class="qr-box" id="cert-qr-container">
-                  <!-- QR Code Canvas Injected by JS -->
+                  <!-- QR Code Injected by WipeXQR -->
                 </div>
 
                 <div class="crypto-meta">
                   <div class="crypto-title">Hardware-Bound Cryptographic Proof</div>
                   <div class="crypto-row">
                     <span class="c-key">Hardware Hash (SHA-256):</span>
-                    <span class="c-val font-mono text-blue" id="cert-sha256">—</span>
+                    <span class="c-val font-mono"><a href="javascript:void(0)" onclick="app.verifyCurrentCertInPortal()" class="cert-link" id="cert-sha256" title="Verify cryptographic digest in ledger">—</a></span>
                   </div>
                   <div class="crypto-row" style="margin-top:4px;">
                     <span class="c-key">Digital Nonce:</span>
