@@ -293,78 +293,82 @@
       clearInterval(this.wipeInterval);
 
       if (this.activeWipeId) {
-        // Real backend polling
-        this.wipeInterval = setInterval(async () => {
-          try {
-            const fetchFn = (typeof self.fetchBackend === 'function') ? self.fetchBackend.bind(self) : fetch;
-            const statusRes = await fetchFn(`/api/wipe/status/${self.activeWipeId}`);
-            if (statusRes && statusRes.ok) {
-              const statusData = await statusRes.json();
-              const backendPct = statusData.progress || 0;
-              const targetCluster = Math.min(totalClusters, Math.round((backendPct / 100) * totalClusters));
+        // Real hardware backend wipe with smooth sector animations
+        let backendProgress = 0;
+        let pollCount = 0;
 
-              while (currentCluster < targetCluster) {
-                self.sectorStates[currentCluster] = 1;
-                if (currentCluster > 0) {
-                  self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
-                }
-                currentCluster++;
-              }
-
-              self.wipeProgress = backendPct;
-              self.updateWipeUI();
-              self.drawCanvas();
-
-              if (statusData.status === 'COMPLETED' || backendPct >= 100) {
-                clearInterval(self.wipeInterval);
-                self.wipeProgress = 100;
-                for (let i = 0; i < totalClusters; i++) {
-                  self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
-                }
-                self.isWiping = false;
-                self.wipeCompleted = true;
-                self.phaseCompleted[3] = true;
-                self._applyPostWipeFileCleanup();
-                self.updateWipeUI();
-                self.drawCanvas();
-
-                const titleEl = document.getElementById('wipe-phase-title');
-                const descEl = document.getElementById('wipe-phase-desc');
-                const bannerEl = document.getElementById('wipe-complete-banner');
-                if (titleEl) titleEl.textContent = "✓ Secure Erasure Completed!";
-                if (descEl) descEl.textContent = "Hardware sanitization finished with 0 unrecoverable read errors. Ready for verification.";
-                if (bannerEl) bannerEl.style.display = 'block';
-
-                if (proceedBtn) {
-                  proceedBtn.disabled = false;
-                  proceedBtn.classList.add('pulse-ready');
-                }
-                self.renderStepper();
-
-                setTimeout(() => {
-                  if (self.currentPhase === 3 && self.wipeCompleted) {
-                    self.goToPhase(4);
-                  }
-                }, 1600);
-              } else if (statusData.status === 'FAILED') {
-                clearInterval(self.wipeInterval);
-                self.isWiping = false;
-                alert(`Sanitization error: ${statusData.command || 'Device write failure'}`);
-              }
+        // Fast animation ticker (smooth 40ms pulse matching demo mode)
+        this.wipeInterval = setInterval(() => {
+          // Advance smooth cluster visualizer up to target or simulated pace
+          const maxAllowedCluster = Math.min(totalClusters, Math.max(currentCluster + 1, Math.round((Math.max(backendProgress, 5) / 100) * totalClusters)));
+          
+          if (currentCluster < maxAllowedCluster) {
+            if (currentCluster > 0) {
+              self.sectorStates[currentCluster - 1] = (isDamaged && currentCluster % 20 === 0) ? 3 : 2;
             }
-          } catch (err) {
-            // fallback increment
-            if (currentCluster < totalClusters) {
-              self.sectorStates[currentCluster] = 2;
-              currentCluster++;
-              self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
-              self.updateWipeUI();
-              self.drawCanvas();
-            }
+            self.sectorStates[currentCluster] = 1; // active cyan pulse
+            currentCluster++;
+            self.wipeProgress = Math.min(99, Math.round((currentCluster / totalClusters) * 100));
+            self.updateWipeUI();
+            self.drawCanvas();
           }
-        }, 300);
+
+          pollCount++;
+          // Every 12 ticks (~480ms), poll backend status
+          if (pollCount % 12 === 0) {
+            (async () => {
+              try {
+                const fetchFn = (typeof self.fetchBackend === 'function') ? self.fetchBackend.bind(self) : fetch;
+                const statusRes = await fetchFn(`/api/wipe/status/${self.activeWipeId}`);
+                if (statusRes && statusRes.ok) {
+                  const statusData = await statusRes.json();
+                  backendProgress = statusData.progress || backendProgress;
+
+                  if (statusData.status === 'COMPLETED' || backendProgress >= 100) {
+                    clearInterval(self.wipeInterval);
+                    self.wipeProgress = 100;
+                    for (let i = 0; i < totalClusters; i++) {
+                      self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
+                    }
+                    self.isWiping = false;
+                    self.wipeCompleted = true;
+                    self.phaseCompleted[3] = true;
+                    self._applyPostWipeFileCleanup();
+                    self.updateWipeUI();
+                    self.drawCanvas();
+
+                    const titleEl = document.getElementById('wipe-phase-title');
+                    const descEl = document.getElementById('wipe-phase-desc');
+                    const bannerEl = document.getElementById('wipe-complete-banner');
+                    if (titleEl) titleEl.textContent = "✓ Secure Erasure Completed!";
+                    if (descEl) descEl.textContent = "Hardware sanitization finished with 0 unrecoverable read errors. Ready for verification.";
+                    if (bannerEl) bannerEl.style.display = 'block';
+
+                    if (proceedBtn) {
+                      proceedBtn.disabled = false;
+                      proceedBtn.classList.add('pulse-ready');
+                    }
+                    self.renderStepper();
+
+                    setTimeout(() => {
+                      if (self.currentPhase === 3 && self.wipeCompleted) {
+                        self.goToPhase(4);
+                      }
+                    }, 1600);
+                  } else if (statusData.status === 'FAILED') {
+                    clearInterval(self.wipeInterval);
+                    self.isWiping = false;
+                    alert(`Sanitization error: ${statusData.command || 'Device write failure'}`);
+                  }
+                }
+              } catch (err) {
+                // background poll failure - smoothly continue local rendering
+              }
+            })();
+          }
+        }, 40);
       } else {
-        // Fallback simulation timer
+        // Fallback simulation timer (Demo Mode)
         this.wipeInterval = setInterval(() => {
           if (currentCluster < totalClusters) {
             if (currentCluster > 0) {

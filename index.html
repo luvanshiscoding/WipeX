@@ -39,7 +39,11 @@
 
       <!-- Navigation -->
       <nav class="header-nav">
-        <button class="nav-tab active" id="nav-workflow-btn" onclick="app.switchView('workflow')">
+        <button class="nav-tab active" id="nav-dashboard-btn" onclick="app.switchView('dashboard')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>Overview</span>
+        </button>
+        <button class="nav-tab" id="nav-workflow-btn" onclick="app.switchView('workflow')">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           <span>Wipe a Drive</span>
         </button>
@@ -58,8 +62,84 @@
   <!-- Main Container -->
   <main class="main-container">
 
+    <!-- VIEW 0: 3D CYBERSECURITY ENTERPRISE DASHBOARD -->
+    <div id="dashboard-view" class="view-panel active">
+      <div class="cyber-hero-card">
+        <!-- 3D Canvas Background -->
+        <canvas id="cyber-3d-canvas" class="cyber-3d-canvas"></canvas>
+        <div class="cyber-grid-overlay"></div>
+
+        <div class="cyber-hero-content">
+          <!-- Top Badge -->
+          <div class="cyber-badge-pill">
+            <span class="cyber-pulse-dot"></span>
+            <span class="cyber-badge-text">ENTERPRISE HARDWARE SANITIZATION CORE · ACTIVE v2.5</span>
+          </div>
+
+          <!-- Animated Title with TypeScript Typewriter -->
+          <h1 class="cyber-hero-title">
+            <span class="title-gradient">WipeX</span>
+            <span class="title-subtext">Zero-Trust Physical Data Sanitization</span>
+          </h1>
+
+          <!-- Interactive Terminal Prompt with TypeScript Typewriter Code Animation -->
+          <div class="cyber-terminal-box">
+            <div class="terminal-bar">
+              <div class="terminal-dots">
+                <span class="t-dot red"></span>
+                <span class="t-dot yellow"></span>
+                <span class="t-dot green"></span>
+              </div>
+              <span class="terminal-title">wipex-kernel-stream.ts — Enterprise Physical Erasure Engine</span>
+              <span class="terminal-lang">TypeScript 5.4</span>
+            </div>
+            <div class="terminal-body">
+              <pre class="terminal-code"><code id="typescript-typewriter-target"></code><span class="typewriter-cursor">█</span></pre>
+            </div>
+          </div>
+
+          <!-- Key Value Metrics Grid -->
+          <div class="cyber-metrics-grid">
+            <div class="c-metric-item">
+              <div class="c-metric-val text-cyan" id="dash-metric-entropy">0.000000</div>
+              <div class="c-metric-label">Shannon Mathematical Entropy Target</div>
+            </div>
+            <div class="c-metric-item">
+              <div class="c-metric-val text-emerald" id="dash-metric-standards">NIST 800-88</div>
+              <div class="c-metric-label">Rev. 1 Purge & IEEE 2883-2022</div>
+            </div>
+            <div class="c-metric-item">
+              <div class="c-metric-val text-amber" id="dash-metric-crypto">ECDSA P-256</div>
+              <div class="c-metric-label">Hardware-Bound Asymmetric Signatures</div>
+            </div>
+            <div class="c-metric-item">
+              <div class="c-metric-val text-neon" id="dash-metric-devices">100% Raw I/O</div>
+              <div class="c-metric-label">Direct NVMe / ATA / Block Controller</div>
+            </div>
+          </div>
+
+          <!-- Main CTA Actions -->
+          <div class="cyber-hero-actions">
+            <button type="button" class="btn btn-primary cyber-cta-btn" onclick="app.switchView('workflow')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>Launch Drive Sanitization</span>
+              <div class="btn-glow-aura"></div>
+            </button>
+            <button type="button" class="btn btn-secondary cyber-sub-btn" onclick="app.switchView('history')">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Audit Ledger & Certificates</span>
+            </button>
+            <button type="button" class="btn btn-secondary cyber-sub-btn" onclick="app.switchView('portal')">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>Public Verification</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- VIEW 1: STEP-BY-STEP WIPE WIZARD -->
-    <div id="workflow-view" class="view-panel active">
+    <div id="workflow-view" class="view-panel">
       
       <!-- Stepper -->
       <div class="phase-stepper-container">
@@ -532,6 +612,7 @@
   <script src="js/utils/crypto.js"></script>
   <script src="js/utils/entropy.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/app_cyber_dashboard.js"></script>
   <script src="js/app_drive_status.js"></script>
   <script src="js/app_modals.js"></script>
   <script src="js/app_tree_view.js"></script>

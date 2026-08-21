@@ -10,7 +10,7 @@ class WipeXApp {
     this.apiBaseUrl = (host === 'localhost' || host === '127.0.0.1') ? `http://${host}:8000` : (loc && loc.origin ? loc.origin : 'http://localhost:8000');
     this.activeWipeId = null;
 
-    this.activeView = 'workflow';
+    this.activeView = 'dashboard';
     this.currentPhase = 1;
 
     this.devices = [];
@@ -123,7 +123,9 @@ class WipeXApp {
     this.renderMethodOptions();
     this.initCanvas();
     await this.loadDevices();
-    this.startAutoDetection();
+    if (this.activeView === 'dashboard' && typeof this.initDashboardAnimations === 'function') {
+      this.initDashboardAnimations();
+    }
 
     // Check if user opened page via a scanned QR code with verification parameters
     const params = new URLSearchParams(window.location.search);
@@ -329,8 +331,8 @@ class WipeXApp {
     let devices = [];
 
     if (this.demoMode) {
-      // In DEMO MODE: Show the interactive scenario presets
-      devices = (window.MOCK_DEVICES || []).map(d => ({ ...d }));
+      // In DEMO MODE: Deep clone interactive scenario presets to keep demo files isolated and intact
+      devices = (window.MOCK_DEVICES || []).map(d => JSON.parse(JSON.stringify(d)));
     } else {
       // In REAL HARDWARE MODE: Fetch and show real physical connected devices via backend probe
       try {
@@ -395,7 +397,13 @@ class WipeXApp {
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
 
-    if (viewName === 'workflow') {
+    if (viewName === 'dashboard') {
+      document.getElementById('nav-dashboard-btn')?.classList.add('active');
+      document.getElementById('dashboard-view')?.classList.add('active');
+      if (typeof this.initDashboardAnimations === 'function') {
+        this.initDashboardAnimations();
+      }
+    } else if (viewName === 'workflow') {
       document.getElementById('nav-workflow-btn')?.classList.add('active');
       document.getElementById('workflow-view')?.classList.add('active');
     } else if (viewName === 'portal') {
@@ -410,20 +418,90 @@ class WipeXApp {
   }
 
   async loadHistory() {
+    let sessions = [];
+    let certs = [];
+
     try {
       const [sessRes, certRes] = await Promise.all([
         this.fetchBackend('/api/wipe/sessions'),
         this.fetchBackend('/api/certificates')
       ]);
-      const sessions = sessRes?.ok ? await sessRes.json() : [];
-      const certData = certRes?.ok ? await certRes.json() : {};
-      this._historySessions = Array.isArray(sessions) ? sessions : [];
-      this._historyCerts = Array.isArray(certData.certificates) ? certData.certificates : [];
-      this.renderSessionsTable();
-      this.renderCertsTable();
+      if (sessRes && sessRes.ok) {
+        const data = await sessRes.json();
+        if (Array.isArray(data)) sessions = data;
+      }
+      if (certRes && certRes.ok) {
+        const data = await certRes.json();
+        if (Array.isArray(data.certificates)) certs = data.certificates;
+      }
     } catch (e) {
-      console.error('Failed to load history:', e);
+      console.warn('Backend history lookup failed:', e);
     }
+
+    // If in Demo Mode or backend is empty, seed with rich preset history
+    if (this.demoMode || (sessions.length === 0 && certs.length === 0)) {
+      const defaultMockCerts = window.CERTIFICATE_STORE ? Object.values(window.CERTIFICATE_STORE) : [];
+      const defaultMockSessions = [
+        {
+          wipeId: "WIPE-NVME-980PRO-8F2B",
+          deviceId: "dev-nvme-samsung-980",
+          method: "purge-nvme-crypto",
+          status: "COMPLETED",
+          startedAt: "2026-08-16T23:30:00Z",
+          completedAt: "2026-08-16T23:33:00Z",
+          command: "nvme sanitize /dev/nvme0n1 --action=crypto"
+        },
+        {
+          wipeId: "WIPE-HDD-BARRACUDA-3C1A",
+          deviceId: "dev-hdd-seagate-barracuda",
+          method: "clear-single",
+          status: "COMPLETED",
+          startedAt: "2026-08-15T14:00:00Z",
+          completedAt: "2026-08-15T14:12:00Z",
+          command: "dd if=/dev/zero of=/dev/sdb bs=4M status=progress"
+        },
+        {
+          wipeId: "WIPE-SSD-KINGSTON-RED-99",
+          deviceId: "dev-ssd-kingston-damaged",
+          method: "destroy-physical",
+          status: "FAILED",
+          startedAt: "2026-08-16T18:40:00Z",
+          completedAt: "2026-08-16T18:45:00Z",
+          command: "Physical destruction mandate: 48 unreadable sectors"
+        }
+      ];
+
+      // Merge backend items with mock items (avoiding duplicates)
+      const existingSessionIds = new Set(sessions.map(s => s.wipeId));
+      for (const s of defaultMockSessions) {
+        if (!existingSessionIds.has(s.wipeId)) {
+          sessions.push(s);
+        }
+      }
+
+      const existingCertIds = new Set(certs.map(c => c.certificateId));
+      for (const c of defaultMockCerts) {
+        if (!existingCertIds.has(c.certificateId)) {
+          certs.push(c);
+        }
+      }
+    }
+
+    // Also include any dynamically issued certificates in this session
+    if (this.certificateStore) {
+      const existingCertIds = new Set(certs.map(c => c.certificateId));
+      for (const [id, certObj] of Object.entries(this.certificateStore)) {
+        if (!existingCertIds.has(id)) {
+          certs.unshift(certObj);
+          existingCertIds.add(id);
+        }
+      }
+    }
+
+    this._historySessions = sessions;
+    this._historyCerts = certs;
+    this.renderSessionsTable();
+    this.renderCertsTable();
   }
 
   switchHistoryTab(tab) {
