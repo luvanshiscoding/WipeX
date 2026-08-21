@@ -687,15 +687,32 @@ class WipeXApp {
   }
 
   isPhaseAccessible(phaseNum) {
-    // ANTI-CORRUPTION LOCKOUT: Once wiping starts or completes, backwards navigation to Step 1 or 2 is strictly prohibited
-    if ((this.isWiping || (this.wipeCompleted && this.currentPhase >= 3)) && phaseNum < 3) {
+    // ANTI-CORRUPTION LOCKOUT: Once wiping is in progress or wipe has completed (Steps 3, 4, 5):
+    // 1. Backwards navigation to Step 1 or Step 2 is strictly locked.
+    // 2. Once reaching Step 4 or Step 5 (verification / cert), Step 3 (erase) is also locked against re-entry.
+    if ((this.isWiping || this.wipeCompleted) && phaseNum < 3) {
       return { 
         ok: false, 
-        reason: '🔒 Locked: Drive erasure is in progress or completed. Backwards navigation to selection is disabled for safety.' 
+        reason: '🔒 Locked: Drive erasure is sealed. Backwards navigation to selection is disabled for safety.' 
+      };
+    }
+    if ((this.currentPhase >= 4 || this.phaseCompleted[3]) && phaseNum === 3) {
+      return { 
+        ok: false, 
+        reason: '🔒 Locked: Sanitization already executed. Re-entering active wipe is disabled.' 
       };
     }
 
-    if (phaseNum <= this.currentPhase) return { ok: true };
+    // Step 2 cannot be jumped into via top stepper when currently on Step 1 (must click Continue to Sanitization button)
+    if (this.currentPhase === 1 && phaseNum === 2) {
+      return { 
+        ok: false, 
+        reason: '👉 Click "Continue to Sanitization Method" below the drive explorer to proceed.' 
+      };
+    }
+
+    if (phaseNum === this.currentPhase) return { ok: true };
+    if (phaseNum < this.currentPhase) return { ok: true };
     if (phaseNum > 5 || phaseNum < 1) return { ok: false, reason: 'Invalid step' };
     if (!this.phaseCompleted[1]) return { ok: false, reason: 'Step 1 required: Select a drive first' };
     if (phaseNum >= 3 && !this.phaseCompleted[2]) return { ok: false, reason: 'Step 2 required: Choose a sanitization method first' };

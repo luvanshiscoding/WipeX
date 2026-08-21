@@ -369,13 +369,20 @@ body:not(.demo-mode-active) .demo-only-feature {
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 24px 40px;
+  padding: 18px 24px 28px;
   display: flex;
   flex-direction: column;
+  min-height: calc(100vh - 75px);
 }
 
 .view-panel {
   display: none;
+}
+
+#dashboard-view.active {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .view-panel.active {
@@ -2319,7 +2326,7 @@ body:not(.demo-mode-active) .demo-only-feature {
   border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 240, 255, 0.08);
-  min-height: 520px;
+  min-height: calc(100vh - 130px);
   flex: 1;
   display: flex;
   flex-direction: column;
