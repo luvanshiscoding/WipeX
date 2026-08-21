@@ -1,47 +1,22 @@
 /**
- * WipeX - 3D Cybersecurity Canvas & TypeScript Typewriter Dashboard
- * Features real-time particle grid, floating cryptographic nodes, cyber matrix streams,
- * and realistic code typewriter animation for the homepage.
+ * WipeX - 3D Cybersecurity Canvas & Feature Line-by-Line Typewriter Engine
+ * Renders an interactive 3D particle constellation with cyber horizon grid,
+ * and types out feature highlights smoothly line-by-line in the terminal.
  */
 
 (function() {
   "use strict";
 
-  const TYPEWRITER_SNIPPETS = [
-    `// wipex-kernel-stream.ts - Enterprise Zero-Trust Storage Controller
-import { KernelBlockStream, EntropyAuditor, ECDSA_P256 } from "@wipex/core";
-
-async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeProof> {
-  console.log(\`[WIPEX-KERNEL] Locking physical LBA geometry on \${drive.serialNumber}...\`);
-  
-  // 1. Hardware-level controller purge (SES=2 / NVMe Sanitize)
-  const stream = new KernelBlockStream(drive.rawDevicePath, {
-    mode: "DIRECT_UNBUFFERED_IO",
-    sectorAlignment: 4096,
-    purgeMethod: "NIST_SP_800_88_REV1_PURGE"
-  });
-  
-  await stream.dispatchHardwareKeyDestruction();
-  
-  // 2. High-speed multi-pass cryptographic overwrite
-  await stream.pipeZeroPattern({
-    passes: 1,
-    verifyInterleaved: true,
-    hpaDcoUnfreeze: true
-  });
-  
-  // 3. Mathematical Shannon Entropy Audit (10,000 LBAs)
-  const entropy = await EntropyAuditor.computeShannonEntropy(drive, 10000);
-  assert(entropy.value === 0.000000, "Entropy deviation detected! Residual data remains.");
-  
-  // 4. Hardware-bound ECDSA NIST P-256 Digital Certificate
-  return await ECDSA_P256.signTamperProofCertificate({
-    serial: drive.serialNumber,
-    model: drive.model,
-    entropy: entropy.value,
-    status: "PASSED_100_PERCENT_CLEAN"
-  });
-}`
+  const FEATURE_LINES = [
+    { prefix: "[INIT]", text: "WipeX Enterprise Zero-Trust Data Sanitization Platform loaded.", color: "cyan" },
+    { prefix: "[SCAN]", text: "Real-time storage device discovery across NVMe, SATA SSDs, & HDDs.", color: "green" },
+    { prefix: "[FORENSIC]", text: "Deep undelete scanner reveals hidden trash, unallocated sectors, & .fseventsd.", color: "amber" },
+    { prefix: "[PURGE]", text: "Hardware controller purge: NVMe crypto erase & ATA enhanced voltage reset.", color: "cyan" },
+    { prefix: "[VISUALIZE]", text: "Real-time 256-cluster sector matrix visualizer with live MB/s throughput.", color: "green" },
+    { prefix: "[AUDIT]", text: "Mathematical Shannon Entropy audit proves 100% zero residual data.", color: "cyan" },
+    { prefix: "[TRIAGE]", text: "Circular economy health triage grades drives for resale, internal reuse, or shred.", color: "green" },
+    { prefix: "[LEDGER]", text: "Hardware-bound ECDSA digital certificates & historical audit trail.", color: "amber" },
+    { prefix: "[READY]", text: "All security modules operational. Click "Start Wiping" to begin.", color: "green" }
   ];
 
   class Cyber3DDashboard {
@@ -51,14 +26,13 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
       this.animId = null;
       this.particles = [];
       this.nodes = [];
-      this.connections = [];
       this.gridOffset = 0;
       this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-      this.typewriterIndex = 0;
+      
+      this.typewriterLineIndex = 0;
       this.typewriterCharIndex = 0;
-      this.isTyping = false;
       this.typewriterTimer = null;
-      this.hasInit = false;
+      this.isTyping = false;
     }
 
     init() {
@@ -74,49 +48,46 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
       this.createParticles();
       this.createNodes();
       this.startAnimation();
-      this.startTypewriter();
-      this.hasInit = true;
+      this.startFeatureTypewriter();
     }
 
     resize() {
       if (!this.canvas) return;
       const parent = this.canvas.parentElement;
       this.width = this.canvas.width = parent ? parent.clientWidth : window.innerWidth;
-      this.height = this.canvas.height = parent ? parent.clientHeight : 520;
+      this.height = this.canvas.height = parent ? parent.clientHeight : 540;
     }
 
     createParticles() {
       this.particles = [];
-      const count = Math.min(60, Math.floor(this.width / 20));
+      const count = Math.min(55, Math.floor(this.width / 22));
       for (let i = 0; i < count; i++) {
         this.particles.push({
           x: Math.random() * this.width,
           y: Math.random() * this.height,
           z: Math.random() * 800 + 200,
-          vx: (Math.random() - 0.5) * 0.6,
-          vy: (Math.random() - 0.5) * 0.6,
-          vz: Math.random() * 2 + 1,
-          size: Math.random() * 2 + 1,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: (Math.random() - 0.5) * 0.5,
+          vz: Math.random() * 1.8 + 0.8,
+          size: Math.random() * 2 + 1.2,
           color: Math.random() > 0.4 ? "#00f0ff" : (Math.random() > 0.5 ? "#00ff88" : "#3b82f6"),
-          alpha: Math.random() * 0.7 + 0.3
+          alpha: Math.random() * 0.65 + 0.35
         });
       }
     }
 
     createNodes() {
       this.nodes = [];
-      const nodeCount = 16;
+      const nodeCount = 14;
       for (let i = 0; i < nodeCount; i++) {
         this.nodes.push({
           x: Math.random() * (this.width - 100) + 50,
           y: Math.random() * (this.height - 100) + 50,
-          z: Math.random() * 400 + 100,
           targetX: Math.random() * (this.width - 100) + 50,
           targetY: Math.random() * (this.height - 100) + 50,
-          radius: Math.random() * 4 + 3,
+          radius: Math.random() * 3.5 + 2.5,
           pulse: Math.random() * Math.PI * 2,
-          type: i % 3 === 0 ? "crypto" : (i % 3 === 1 ? "sector" : "audit"),
-          label: i % 3 === 0 ? "ECDSA" : (i % 3 === 1 ? "LBA:0x" + Math.floor(Math.random()*9999).toString(16).toUpperCase() : "H(X)=0.0")
+          color: i % 2 === 0 ? "#00f0ff" : "#00ff88"
         });
       }
     }
@@ -138,10 +109,10 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
 
       ctx.clearRect(0, 0, w, h);
 
-      // 1. Draw 3D Perspective Cyber Horizon Grid
+      // 1. Perspective Cyber Horizon Grid
       this.drawPerspectiveGrid(ctx, w, h);
 
-      // 2. Draw 3D Floating Particles
+      // 2. 3D Floating Particles
       for (const p of this.particles) {
         p.z -= p.vz;
         if (p.z <= 10) {
@@ -153,7 +124,7 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
         const k = 250 / p.z;
         const screenX = (p.x - w / 2) * k + w / 2;
         const screenY = (p.y - h / 2) * k + h / 2;
-        const radius = Math.max(0.5, p.size * k);
+        const radius = Math.max(0.6, p.size * k);
 
         if (screenX >= 0 && screenX <= w && screenY >= 0 && screenY <= h) {
           ctx.beginPath();
@@ -168,14 +139,14 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
         }
       }
 
-      // 3. Draw Interconnected Network Nodes
+      // 3. Floating Network Nodes & Connections
       for (let i = 0; i < this.nodes.length; i++) {
         const n1 = this.nodes[i];
-        n1.pulse += 0.04;
-        n1.x += (n1.targetX - n1.x) * 0.01;
-        n1.y += (n1.targetY - n1.y) * 0.01;
+        n1.pulse += 0.035;
+        n1.x += (n1.targetX - n1.x) * 0.008;
+        n1.y += (n1.targetY - n1.y) * 0.008;
 
-        if (Math.hypot(n1.targetX - n1.x, n1.targetY - n1.y) < 5) {
+        if (Math.hypot(n1.targetX - n1.x, n1.targetY - n1.y) < 6) {
           n1.targetX = Math.random() * (w - 100) + 50;
           n1.targetY = Math.random() * (h - 100) + 50;
         }
@@ -183,8 +154,8 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
         for (let j = i + 1; j < this.nodes.length; j++) {
           const n2 = this.nodes[j];
           const dist = Math.hypot(n1.x - n2.x, n1.y - n2.y);
-          if (dist < 180) {
-            const alpha = (1 - dist / 180) * 0.25;
+          if (dist < 160) {
+            const alpha = (1 - dist / 160) * 0.2;
             ctx.beginPath();
             ctx.moveTo(n1.x, n1.y);
             ctx.lineTo(n2.x, n2.y);
@@ -195,90 +166,115 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
         }
 
         // Draw node aura
-        const currentRadius = n1.radius + Math.sin(n1.pulse) * 1.5;
-        const color = n1.type === "crypto" ? "#00f0ff" : (n1.type === "sector" ? "#00ff88" : "#38bdf8");
-
+        const currentRadius = n1.radius + Math.sin(n1.pulse) * 1.2;
         ctx.beginPath();
-        ctx.arc(n1.x, n1.y, currentRadius * 2.2, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.15;
+        ctx.arc(n1.x, n1.y, currentRadius * 2, 0, Math.PI * 2);
+        ctx.fillStyle = n1.color;
+        ctx.globalAlpha = 0.12;
         ctx.fill();
 
         ctx.beginPath();
         ctx.arc(n1.x, n1.y, currentRadius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.9;
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = color;
+        ctx.fillStyle = n1.color;
+        ctx.globalAlpha = 0.85;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = n1.color;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1.0;
-
-        // Label
-        ctx.font = "10px JetBrains Mono, monospace";
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.fillText(n1.label, n1.x + 8, n1.y + 3);
       }
     }
 
     drawPerspectiveGrid(ctx, w, h) {
-      this.gridOffset = (this.gridOffset + 0.4) % 40;
+      this.gridOffset = (this.gridOffset + 0.35) % 36;
       const horizon = h * 0.65;
 
       ctx.save();
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.07)";
+      ctx.strokeStyle = "rgba(0, 240, 255, 0.06)";
       ctx.lineWidth = 1;
 
-      // Perspective vertical grid lines converging towards center horizon
-      const vanishX = w / 2 + (this.mouse.x - w / 2) * 0.1;
-      const vanishY = horizon - 40;
+      const vanishX = w / 2 + (this.mouse.x - w / 2) * 0.08;
+      const vanishY = horizon - 30;
 
-      for (let x = -w * 0.5; x <= w * 1.5; x += 60) {
+      for (let x = -w * 0.4; x <= w * 1.4; x += 55) {
         ctx.beginPath();
         ctx.moveTo(x, h);
         ctx.lineTo(vanishX, vanishY);
         ctx.stroke();
       }
 
-      // Horizontal ground plane lines
-      for (let y = horizon; y <= h; y += 18) {
+      for (let y = horizon; y <= h; y += 16) {
         const factor = (y - horizon) / (h - horizon);
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
-        ctx.strokeStyle = "rgba(0, 240, 255, " + (factor * 0.12) + ")";
+        ctx.strokeStyle = "rgba(0, 240, 255, " + (factor * 0.1) + ")";
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    startTypewriter() {
-      const target = document.getElementById("typescript-typewriter-target");
-      if (!target) return;
+    startFeatureTypewriter() {
+      const container = document.getElementById("feature-typewriter-container");
+      if (!container) return;
 
-      const snippet = TYPEWRITER_SNIPPETS[this.typewriterIndex % TYPEWRITER_SNIPPETS.length];
-      target.textContent = "";
+      container.innerHTML = "";
+      this.typewriterLineIndex = 0;
       this.typewriterCharIndex = 0;
 
       if (this.typewriterTimer) clearInterval(this.typewriterTimer);
 
-      this.typewriterTimer = setInterval(() => {
-        if (this.typewriterCharIndex < snippet.length) {
-          const char = snippet.charAt(this.typewriterCharIndex);
-          target.textContent += char;
-          this.typewriterCharIndex++;
-        } else {
-          clearInterval(this.typewriterTimer);
-          // Pause then restart
+      const typeNextLine = () => {
+        if (this.typewriterLineIndex >= FEATURE_LINES.length) {
+          // Loop after pause
           setTimeout(() => {
-            this.startTypewriter();
-          }, 8000);
+            this.startFeatureTypewriter();
+          }, 6000);
+          return;
         }
-      }, 25);
+
+        const lineData = FEATURE_LINES[this.typewriterLineIndex];
+        const lineEl = document.createElement("div");
+        lineEl.className = "t-feature-line";
+
+        const prefixEl = document.createElement("span");
+        prefixEl.className = "t-prefix prefix-" + lineData.color;
+        prefixEl.textContent = lineData.prefix + " ";
+
+        const textEl = document.createElement("span");
+        textEl.className = "t-text";
+
+        const cursorEl = document.createElement("span");
+        cursorEl.className = "typewriter-cursor";
+        cursorEl.textContent = "█";
+
+        lineEl.appendChild(prefixEl);
+        lineEl.appendChild(textEl);
+        lineEl.appendChild(cursorEl);
+        container.appendChild(lineEl);
+
+        // Auto-scroll terminal container
+        container.parentElement.scrollTop = container.parentElement.scrollHeight;
+
+        let charIdx = 0;
+        const charTimer = setInterval(() => {
+          if (charIdx < lineData.text.length) {
+            textEl.textContent += lineData.text.charAt(charIdx);
+            charIdx++;
+            container.parentElement.scrollTop = container.parentElement.scrollHeight;
+          } else {
+            clearInterval(charTimer);
+            cursorEl.remove();
+            this.typewriterLineIndex++;
+            setTimeout(typeNextLine, 280);
+          }
+        }, 18);
+      };
+
+      typeNextLine();
     }
   }
 
-  // Attach dashboard helper to prototype
   function attachDashboard() {
     const proto = (typeof WipeXApp !== "undefined") ? WipeXApp.prototype : null;
     if (!proto) {
@@ -296,7 +292,6 @@ async function executeCertifiedSanitization(drive: PhysicalMedia): Promise<WipeP
 
   attachDashboard();
 
-  // Auto initialize on DOMContentLoaded if dashboard is open
   document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => {
       if (window.app && typeof window.app.initDashboardAnimations === "function") {
