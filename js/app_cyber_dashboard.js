@@ -297,11 +297,102 @@
 
   attachDashboard();
 
-  document.addEventListener("DOMContentLoaded", () => {
-    setTimeout(() => {
-      if (window.app && typeof window.app.initDashboardAnimations === "function") {
-        window.app.initDashboardAnimations();
+  // ─── Global Background Canvas (persists across all views) ─────────────────
+  class GlobalBgCanvas {
+    constructor() {
+      this.canvas = document.getElementById("global-bg-canvas");
+      this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
+      this.particles = [];
+      this.animId = null;
+      this.width = 0;
+      this.height = 0;
+      this.mouse = { x: -9999, y: -9999 };
+    }
+
+    init() {
+      if (!this.canvas || !this.ctx) return;
+      this.resize();
+      window.addEventListener("resize", () => this.resize());
+      window.addEventListener("mousemove", (e) => {
+        this.mouse.x = e.clientX;
+        this.mouse.y = e.clientY;
+      });
+      this.spawnParticles();
+      this.animate();
+    }
+
+    resize() {
+      this.width = this.canvas.width = window.innerWidth;
+      this.height = this.canvas.height = window.innerHeight;
+    }
+
+    spawnParticles() {
+      this.particles = [];
+      const count = Math.min(80, Math.floor((this.width * this.height) / 18000));
+      for (let i = 0; i < count; i++) {
+        this.particles.push(this.makeParticle());
       }
-    }, 100);
+    }
+
+    makeParticle(atBottom = false) {
+      return {
+        x: Math.random() * this.width,
+        y: atBottom ? this.height + 10 : Math.random() * this.height,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: -(Math.random() * 0.5 + 0.15),
+        radius: Math.random() * 1.8 + 0.4,
+        alpha: Math.random() * 0.5 + 0.15,
+        color: Math.random() > 0.5 ? "#00f0ff" : (Math.random() > 0.5 ? "#00ff88" : "#6366f1"),
+        life: 1.0,
+        decay: Math.random() * 0.002 + 0.001
+      };
+    }
+
+    animate() {
+      const ctx = this.ctx;
+      const w = this.width;
+      const h = this.height;
+      ctx.clearRect(0, 0, w, h);
+
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+
+        // Subtle mouse repulsion
+        const dx = p.x - this.mouse.x;
+        const dy = p.y - this.mouse.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          const force = (120 - dist) / 120 * 0.4;
+          p.vx += (dx / dist) * force;
+          p.vy += (dy / dist) * force;
+        }
+
+        if (p.life <= 0 || p.y < -10 || p.x < -10 || p.x > w + 10) {
+          this.particles[i] = this.makeParticle(true);
+          continue;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha * p.life;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = p.color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      }
+
+      this.animId = requestAnimationFrame(() => this.animate());
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    // Boot the global background animation
+    const globalBg = new GlobalBgCanvas();
+    globalBg.init();
   });
 })();
