@@ -1,133 +1,141 @@
-# WipeX
+# WipeX — Enterprise Data Sanitization & Hardware Compliance Platform
 
-**Zero-Trust Data Sanitization, Hardware-Bound Verification, and Tamper-Proof Certification Platform**
-
-WipeX is an enterprise-grade platform for physical storage sanitization, mathematical Shannon entropy auditing, circular economy triage, and cryptographic compliance certification for NVMe SSDs, SATA SSDs, magnetic hard drives, and mobile flash media.
+**Enterprise-Exclusive Zero-Trust Physical Media Sanitization, Mathematical Shannon Entropy Verification, and Cryptographic Compliance Ledger**
 
 ---
 
-## Key Capabilities
-
-### 1. Guided 6-Phase Sanitization Stepper
-- **Step 1: Select Drive & File Tree Explorer**: Real-time connected storage discovery (macOS `diskutil`, Windows PowerShell `Get-Disk`, Linux `lsblk`, Android ADB) with active vs. recoverable deleted file footprint analysis.
-- **Step 2: Choose Method (Curated ITAD Recycling Tiers)**: Automatic intelligent recommendation based on physical media type:
-  - *Standard ITAD Tier*: Quick Single-Pass Zero Clear (NIST SP 800-88 Clear)
-  - *NVMe Flash Tier*: NIST SP 800-88 Cryptographic Purge (Native Controller Hardware Key Destruction)
-  - *SATA Flash Tier*: NIST SP 800-88 Enhanced Security Erase (Purge with HPA/DCO boundary unfreezing)
-  - *Magnetic Platter Tier*: DoD 5220.22-M 3-Pass Overwrite
-  - *High-Assurance / Defense Tier*: Peter Gutmann 35-Pass Forensic Magnetic Platter Purge
-  - *Mandatory Shred Tier*: NIST SP 800-88 Mechanical Disintegration (<2mm shredding) for failing hardware
-- **Step 3: Erase Data (256-Cluster Matrix Visualizer)**: Real-time sector-by-sector write progress, write throughput (MB/s), live ETA, and block state transitions.
-- **Step 4: Zero-Trust Mathematical Audit**: Independent read sampling across physical LBA geometry computing exact Shannon Entropy $H(X) = -\sum P(x)\log_2 P(x) = 0.000000 \text{ bits/byte}$.
-- **Step 5: Safety Assessment (Circular Economy)**: Traffic-light triage (Green: Safe for Reuse/Resale, Yellow: Internal Reuse, Red: Physical Shred Mandate).
-- **Step 6: Cryptographic Certificate & Decentralized Verification**: Hardware-bound SHA-256 digest, NIST P-256 ECDSA digital signature, ISO/IEC 18004 scannable vector QR code, and anti-forgery watermarks.
+> ### 🔒 Restricted Access Notice
+> **WipeX is an enterprise B2B platform exclusively accessible to verified IT organizations, ITADs (IT Asset Disposition), Enterprise Data Centers, and Certified Electronics Recyclers.**  
+> *To prevent malicious abuse—including unauthorized forensic tampering or cyber-theft evidence destruction—WipeX is not offered as an unvetted public utility. Prospective enterprise clients undergo strict corporate identity validation, compliance accreditation screening (e.g., ISO 27001, R2v3, e-Stewards), and key-authorized provisioning before access is granted.*
 
 ---
 
-### 2. Full Drive Wipe vs. Selective File/Folder Shredding
-- **Full Drive Wipe (Default)**: Sanitizes 100% of the physical storage block device across all sectors, hidden partitions, and overprovisioned blocks.
-- **Selective File Wipe**: Allows single-select or multi-select file/folder targeted sanitization via checkboxes in the File Explorer. Overwrites selected target files with cryptographic patterns, resets metadata, truncates file headers, and unlinks from the file system while leaving unselected data intact. Generates a dedicated **Certificate of Targeted File Sanitization**.
+## 🏢 Business Model & Enterprise Ecosystem
+
+WipeX is architected specifically for corporate IT asset governance, enterprise decommissioning, and circular economy compliance:
+
+```
+                               ┌─────────────────────────────────────────┐
+                               │   ENTERPRISE ONBOARDING & VERIFICATION  │
+                               │  • Corporate & ITAD Accreditation Check │
+                               │  • ISO 27001 / R2v3 / e-Stewards Audit  │
+                               │  • Cryptographic Tenant Key Assignment  │
+                               └────────────────────┬────────────────────┘
+                                                    │
+                                                    ▼
+                               ┌─────────────────────────────────────────┐
+                               │       WIPEX ENTERPRISE WORKSTATION      │
+                               │  • Multi-Tier Physical Drive Sanitize   │
+                               │  • Forensic Footprint & Undelete Audit  │
+                               │  • Mathematical Shannon Entropy Engine  │
+                               │  • Circular Economy Health Assessment   │
+                               └────────────────────┬────────────────────┘
+                                                    │
+                                                    ▼
+                               ┌─────────────────────────────────────────┐
+                               │     COMPLIANCE & AUDIT TRAIL LEDGER     │
+                               │  • NIST P-256 ECDSA Tamper-Proof Certs  │
+                               │  • Historical Session & Log Archives    │
+                               │  • Immutable PostgreSQL/SQLite Ledger   │
+                               │  • Audit-Ready PDF / JSON Cert Exports  │
+                               └─────────────────────────────────────────┘
+```
 
 ---
 
-### 3. Low-Level Kernel & Hardware Storage Engine
-- **Direct Raw Block Streaming**: Streams unbuffered binary buffers directly to `/dev/rdiskX` (macOS), `/dev/sdX` / `/dev/nvmeXn1` (Linux), and `\\.\PhysicalDriveX` (Windows).
-- **Automated Safe Unmounting**: Automatically forces unmount of active partition mount points before raw block writes.
-- **Pre-Wipe MBR Backup**: Backs up the master boot record (first 512 bytes) before erasure.
-- **Hardware Controller Purges**: Native NVMe crypto-erase (`nvme sanitize -a crypto`), two-step ATA Enhanced Security Erase (`hdparm --security-set-pass` -> `--security-erase-enhanced`), and TCG Opal 2.0 SED crypto-erase (`sedutil-cli`).
-- **Android Mobile Sanitization**: Detects connected Android devices via ADB, executes Fastboot partition format and recovery master clear.
+## ⚡ Key Architecture & Core Workflow
+
+WipeX utilizes a structured **5-Phase Hardware Sanitization Stepper**:
+
+### 1. Phase 1: Select Storage Drive & Real Forensic Footprint Inspection
+- **Hardware Discovery**: Direct physical disk topology probing via macOS `diskutil`, Linux `lsblk`, and Windows storage APIs.
+- **Forensic Footprint & Undelete Analysis**: Scans active filesystem data, OS Trash bins, transaction journals (`.fseventsd`), and unallocated sectors. Shows organizations exactly which active files and permanently deleted unlinked files remain recoverable on unsanitized drives.
+- **SMART Health Telemetry**: Live extraction of power-on hours, raw operating temperature, reallocated sector counts, and SSD wear percentages.
+
+### 2. Phase 2: Curated ITAD Sanitization Tier Selection
+- **Intelligent Media-Aware Matching**: Automatically evaluates disk controller architecture and recommends the exact regulatory erasure standard:
+  - **Standard ITAD Tier**: NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00 Overwrite).
+  - **NVMe Flash Tier**: NIST SP 800-88 Cryptographic Purge (Instant hardware encryption key destruction across all NAND channels).
+  - **SATA Flash Tier**: NIST SP 800-88 Enhanced Security Erase (Firmware-level block voltage purge with HPA/DCO unfreezing).
+  - **Magnetic Platter Tier**: DoD 5220.22-M 3-Pass Military Overwrite (`0x00`, `0xFF`, Cryptographic PRNG).
+  - **High-Assurance / Defense Tier**: Peter Gutmann 35-Pass Forensic Magnetic Platter Purge.
+  - **Mandatory Shred Tier**: NIST SP 800-88 Mechanical Disintegration (<2mm shred mandate for damaged media).
+
+### 3. Phase 3: Hardware Sanitization & 256-Cluster Matrix Visualizer
+- **Raw Block Streaming**: Unbuffered binary block I/O directly streaming to block devices (`/dev/rdiskX`, `/dev/sdX`, `\\.\PhysicalDriveX`).
+- **Real-Time Matrix Visualizer**: 256-cell interactive canvas displaying active write sweeps, block completions, live throughput (MB/s), and real-time remaining ETA.
+- **Anti-Corruption Safety Lockout (`🔒`)**: Irrevocably seals Phase 1 and 2 parameters once wiping begins, preventing session hijacking or double-wipe state corruption.
+
+### 4. Phase 4: Zero-Trust Verification & Circular Economy Safety Assessment
+- **Mathematical Shannon Entropy Audit**: Independent post-wipe verification sampling 10,000 LBAs across physical geometry to prove absolute data destruction:
+  $$H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i) = 0.000000 \text{ bits/byte}$$
+- **Circular Economy Triage Health Score**:
+  - 🟢 **GREEN (Safe for Resale / Secondary Market)**: $H(X) = 0.000000$, 0 bad sectors, health $\ge 90\%$, lifetime $< 20,000\text{ hrs}$.
+  - 🟡 **YELLOW (Internal Corporate Redeployment Only)**: $H(X) = 0.000000$, healthy cells, but elevated hours ($> 30,000\text{ hrs}$).
+  - 🔴 **RED (Mandatory Physical Shred Order)**: Physical sector errors, SMART threshold tripping, or audit failure.
+
+### 5. Phase 5: Hardware-Bound NIST P-256 ECDSA Certificate
+- **Asymmetric Cryptographic Binding**: Binds physical drive Serial Number, Model, sanitization standard, timestamp, and 128-bit digital nonce into a canonical SHA-256 digest.
+- **ECDSA Signature**: Digitally signed using a secure NIST P-256 (secp256r1) ECDSA private key.
+- **Export & Verification**: Instant PDF generation, clean print stylesheets, and backend cryptographic validation.
 
 ---
 
-### 4. Hardware-Bound Asymmetric Cryptography (NIST P-256 ECDSA)
-- Digitally signs certificate digests with a NIST P-256 (secp256r1) ECDSA private key.
-- Canonical SHA-256 digest binds drive serial number, model, digital nonce, sanitization standard, timestamp, and outcome.
-- Signatures are encoded in Base64 ASN.1 DER format and cryptographically verified in both frontend (Web Crypto API) and backend.
+## 📜 Audit Trail & Historical Ledger Tab
+
+WipeX includes a centralized **History & Audit Hub**:
+- **Wipe Sessions Registry**: Detailed audit trail of every past sanitization run (Device ID, model, method, operator timestamp, sector count, duration, final status).
+- **Certificate Vault**: Searchable historical certificate repository with instant PDF / JSON redownloads.
+- **Dual Database Persistence**: Seamless synchronization to PostgreSQL (port 5432) for enterprise data center logging with automatic local SQLite fallback (`wipex.db`).
+- **One-Click Ledger Maintenance**: Granular audit trail clearing and database maintenance controls.
 
 ---
 
-### 5. ISO/IEC 18004 Scannable QR Code & Public Verification Portal
-- Generated using the standardized `qrcode-generator` engine with Reed-Solomon Error Correction (Level M) and clean 4-module quiet zones.
-- **Instant Auto-Detection**: Scanning the QR code with any smartphone camera automatically opens the Public Verification Portal, populates the search bar, recomputes the cryptographic proof offline, and displays the verified certificate details.
-- **Anti-Tamper Fraud Alert**: Any alteration to the certificate URL parameters triggers a `FRAUD ALERT — SIGNATURE MISMATCH` warning.
+## 🔬 WipeX vs. ZeroTrace: Impactful Differences
+
+| Feature Dimension | ZeroTrace | WipeX Enterprise Platform |
+|---|---|---|
+| **Access Model** | Unverified public utility (High risk of forensic evasion / evidence destruction abuse) | **Enterprise-Vetted B2B**: Strict business verification & compliance screening before deployment. |
+| **Post-Wipe Verification** | Blind zero-byte check (samples a few bytes for `0x00` values) | **Mathematical Shannon Entropy Audit**: 10,000 LBA sampling proving $H(X) = 0.000000$, catching encrypted fragments, slack space, & metadata leaks. |
+| **Pre-Wipe Forensic Visibility** | None (No visibility into drive content or recoverable files) | **Active Forensic Footprint & Undelete Engine**: Surfaces active files, unallocated clusters, transaction logs (`.fseventsd`), and OS trash remnants. |
+| **Hardware Controller Purge** | Generic user-space file overwriting / basic `dd` commands | **True Hardware Controller Purge**: Native NVMe crypto sanitize (`nvme sanitize -a crypto`), ATA Enhanced Security Erase, and HPA/DCO boundary unfreezing. |
+| **Circular Economy Triage** | No diagnostic health analysis | **Automated ITAD Triage**: Multi-metric SMART telemetry & wear analysis outputting Green (Resale), Yellow (Internal Reuse), or Red (Shred). |
+| **Tamper-Proof Audit Certificates** | Unsigned simulated PDF certificates | **NIST P-256 ECDSA Digital Signatures**: Cryptographically binds hardware serial, nonce, and erasure digest with instant verification API. |
+| **Historical Compliance Ledger** | Basic local session storage | **Enterprise Dual-Ledger Architecture**: Persistent PostgreSQL & SQLite historical records with downloadable compliance certs. |
 
 ---
 
-### 6. Deep Media Diagnostics & False Alarm Scanner
-- Eliminates false positive bad sector alerts caused by transient SATA/NVMe CRC bus glitches vs. genuine physical flash cell wear.
-- Performs direct LBA re-read passes across fault zones to verify if a drive can be safely sanitized or must be physically shredded per NIST SP 800-88 §4.4.
+## 🚀 Deployment & Installation
 
----
+### Prerequisites
+- Python 3.9+ with virtual environment support
+- Node.js 18+ & npm
+- macOS 12+, Ubuntu Linux 20.04+, or Windows 10/11 Enterprise
 
-### 7. Step Anti-Corruption Safety Lockout
-- Once wiping begins or completes, backwards navigation to Steps 1, 2, or 3 is strictly locked (`🔒`) to prevent state corruption, accidental double-wipes, or parameter tampering.
-- A dedicated **"Wipe Another Drive"** reset cleanly initializes a fresh cryptographic session for the next drive.
-
----
-
-## Quick Start
-
-### 1. Run the Web Frontend (Static Server)
+### 1. Launch FastAPI Backend
 ```bash
-python3 -m http.server 5173
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 main.py
+```
+
+### 2. Launch Enterprise Frontend
+```bash
+npm install
+npm run dev
 ```
 Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 
-### 2. Run the FastAPI Hardware Backend Service
-```bash
-pip install -r requirements.txt
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
-```
-Interactive Swagger API documentation is available at `http://localhost:8000/docs`.
+---
 
-### 3. Initialize PostgreSQL Ledger Database (Optional)
-```bash
-psql -U postgres -d wipex -f database.sql
-```
+## ⚖️ Compliance Standards Implemented
+- **NIST Special Publication 800-88 Revision 1**: Guidelines for Media Sanitization (Clear & Purge).
+- **IEEE 2883-2022**: Standard for Sanitizing Storage.
+- **DoD 5220.22-M (National Industrial Security Program Operating Manual)**.
+- **Peter Gutmann 35-Pass Secure Magnetic Media Purge**.
+- **TCG Opal 2.0 / Enterprise Self-Encrypting Drive (SED) Protocols**.
 
 ---
 
-## Technical Specifications
-
-### Shannon Entropy Post-Wipe Verification
-To guarantee zero residual data beyond forensic reconstruction, WipeX computes Shannon Entropy $H(X)$ across 10,000 random sectors:
-
-$$H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i)$$
-
-| Data State | Shannon Entropy $H(X)$ | Audit Verdict |
-|---|---|---|
-| Zeroed / Purged Media | $0.000000 \text{ bits/byte}$ | **PASSED (100% Clean)** |
-| Formatted Filesystem Residue | $0.050000 - 1.200000 \text{ bits/byte}$ | **FAILED (Metadata Leaked)** |
-| Plaintext Documents / Code | $3.500000 - 6.500000 \text{ bits/byte}$ | **FAILED (Unwiped Data)** |
-| High-Entropy Encrypted / PRNG Residue | $7.990000 - 8.000000 \text{ bits/byte}$ | **FAILED (Residual Encrypted Blocks)** |
-
----
-
-## Repository Structure
-
-```
-.
-├── index.html                  # Master Web UI (Dark Void & Cyber Glass Design)
-├── css/
-│   └── styles.css              # Responsive stylesheet & animations
-├── js/
-│   ├── app.js                  # Master application controller & step router
-│   ├── app_drive_status.js     # Storage explorer, capacity bars & selective file wipe
-│   ├── app_modals.js           # Modal popups, 10s destruction countdown & wipe loops
-│   ├── data/
-│   │   ├── mockDevices.js      # Enterprise drive presets for Demo Mode
-│   │   ├── nistStandards.js    # NIST SP 800-88 & ITAD recycling standards catalog
-│   │   └── certificateStore.js # Client-side certificate ledger
-│   └── utils/
-│       ├── crypto.js           # Web Crypto SHA-256 and nonce generator
-│       ├── entropy.js          # Shannon entropy calculator
-│       └── qrGenerator.js      # ISO/IEC 18004 vector QR code engine
-├── main.py                     # FastAPI REST backend service
-├── wipe_engine.py              # Low-level raw block & controller sanitization engine
-├── entropy_auditor.py          # Multiprocess Shannon entropy audit runner
-├── crypto_signer.py            # NIST P-256 ECDSA key management & signing
-├── database.py                 # SQLite / PostgreSQL dual-persistence ledger
-├── database.sql                # PostgreSQL schema definition
-├── keys/                       # ECDSA P-256 public & private key PEMs
-└── package.json                # Project dependencies
-```
+## 📄 License & Compliance Notice
+Enterprise proprietary software. Unauthorized reproduction, unverified distribution, or malicious deployment is strictly prohibited under international cyber security statutes and enterprise licensing agreements.

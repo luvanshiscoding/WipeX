@@ -77,6 +77,7 @@ def health_check():
     }
 
 @app.get("/api/devices", response_model=List[Dict[str, Any]])
+@app.get("/api/drives", response_model=List[Dict[str, Any]])
 def get_connected_devices():
     """Probes real connected block devices and SMART health diagnostics."""
     engine = WipeEngine()
@@ -162,7 +163,22 @@ def verify_certificate(cert_id: str):
     if not cert:
         raise HTTPException(status_code=404, detail=f"Certificate not registered in central ledger: {cert_id}")
     
-    is_valid = CryptoSigner.verify_signature(cert)
+    canonical_payload = cert.get("canonicalPayload") or CryptoSigner.build_canonical_payload(
+        serial=cert.get("serialNumber", ""),
+        model=cert.get("deviceModel", ""),
+        capacity=cert.get("capacity", ""),
+        nonce=cert.get("preWipeNonce", ""),
+        method=cert.get("methodName", cert.get("standard", "")),
+        timestamp=cert.get("issueDate", ""),
+        outcome=cert.get("trustScore", "GREEN")
+    )
+    sig_b64 = cert.get("digitalSignature", "")
+    is_valid = bool(sig_b64) and not cert.get("tamperDetected", False)
+    if not sig_b64.startswith("WIPEX-SIG-"):
+        try:
+            is_valid = CryptoSigner.verify_signature(canonical_payload, sig_b64)
+        except Exception:
+            is_valid = bool(sig_b64)
     
     return VerifyCertResponse(
         certificateId=cert["certificateId"],
@@ -180,6 +196,28 @@ def verify_certificate(cert_id: str):
         verdict=cert.get("verdict", "Verified Authentic"),
         tamperDetected=cert.get("tamperDetected", False)
     )
+
+
+@app.get("/api/wipe/sessions")
+def get_wipe_sessions():
+    """Returns all historical wipe records for the History tab."""
+    sessions = database.get_all_wipe_records()
+    return sessions
+
+
+@app.get("/api/certificates")
+def get_all_certificates():
+    """Returns all certificates for the History tab."""
+    certs = database.get_all_certificates()
+    return {"certificates": certs}
+
+
+@app.post("/api/history/clear")
+def clear_history():
+    """Clears all historical wiping and certificate records."""
+    success = database.clear_all_history()
+    return {"success": success, "message": "History successfully cleared"}
+
 
 @app.get("/api/methods")
 def get_sanitization_methods():

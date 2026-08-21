@@ -122,123 +122,30 @@
     };
 
     proto.setWipeMode = function(mode) {
-      this.wipeScope = (mode === 'selective') ? 'selective' : 'entire';
-
-      const btnEntire = document.getElementById('btn-mode-entire-drive');
-      const btnSelective = document.getElementById('btn-mode-selective-files');
-      const selectiveControls = document.getElementById('selective-controls');
-
-      if (btnEntire) btnEntire.classList.toggle('active', this.wipeScope === 'entire');
-      if (btnSelective) btnSelective.classList.toggle('active', this.wipeScope === 'selective');
-      if (selectiveControls) selectiveControls.style.display = (this.wipeScope === 'selective') ? 'flex' : 'none';
-
-      if (this.wipeScope === 'entire') {
-        if (this.selectedFileNames) this.selectedFileNames.clear();
-      }
-
+      this.wipeScope = 'entire';
       this.updateTargetedSelectionBar();
       this.renderFileExplorerList();
       this.renderSummaryActionBox();
     };
 
-    proto.toggleFileSelection = function(fileName, isChecked) {
-      if (!this.selectedFileNames) this.selectedFileNames = new Set();
-      if (isChecked) {
-        this.selectedFileNames.add(fileName);
-        this.wipeScope = 'selective';
-      } else {
-        this.selectedFileNames.delete(fileName);
-        if (this.selectedFileNames.size === 0) {
-          this.wipeScope = 'entire';
-        }
-      }
-
-      const btnEntire = document.getElementById('btn-mode-entire-drive');
-      const btnSelective = document.getElementById('btn-mode-selective-files');
-      const selectiveControls = document.getElementById('selective-controls');
-
-      if (btnEntire) btnEntire.classList.toggle('active', this.wipeScope === 'entire');
-      if (btnSelective) btnSelective.classList.toggle('active', this.wipeScope === 'selective');
-      if (selectiveControls) selectiveControls.style.display = (this.wipeScope === 'selective') ? 'flex' : 'none';
-
-      this.updateTargetedSelectionBar();
-      this.renderFileExplorerList();
-      this.renderSummaryActionBox();
+    proto.toggleFileSelection = function() {
+      this.wipeScope = 'entire';
     };
 
-    proto.selectAllFiles = function(selectAll) {
-      if (!this.selectedFileNames) this.selectedFileNames = new Set();
-      const dev = this.selectedDevice;
-      if (!dev) return;
-
-      const currentFiles = Array.isArray(dev.currentFiles) ? dev.currentFiles : [];
-      if (selectAll) {
-        this.wipeScope = 'selective';
-        currentFiles.forEach(f => {
-          if (f.name) this.selectedFileNames.add(f.name);
-        });
-      } else {
-        this.selectedFileNames.clear();
-        this.wipeScope = 'entire';
-      }
-
-      const btnEntire = document.getElementById('btn-mode-entire-drive');
-      const btnSelective = document.getElementById('btn-mode-selective-files');
-      const selectiveControls = document.getElementById('selective-controls');
-
-      if (btnEntire) btnEntire.classList.toggle('active', this.wipeScope === 'entire');
-      if (btnSelective) btnSelective.classList.toggle('active', this.wipeScope === 'selective');
-      if (selectiveControls) selectiveControls.style.display = (this.wipeScope === 'selective') ? 'flex' : 'none';
-
-      this.updateTargetedSelectionBar();
-      this.renderFileExplorerList();
-      this.renderSummaryActionBox();
+    proto.selectAllFiles = function() {
+      this.wipeScope = 'entire';
     };
 
     proto.updateTargetedSelectionBar = function() {
-      const isSelective = (this.wipeScope === 'selective');
-      const count = this.selectedFileNames ? this.selectedFileNames.size : 0;
-
       const badgeEl = document.getElementById('active-scope-badge');
       const descEl = document.getElementById('active-scope-desc');
-      const bar = document.getElementById('targeted-selection-bar');
-      const textEl = document.getElementById('targeted-selection-text');
-
-      if (badgeEl) {
-        badgeEl.textContent = isSelective 
-          ? (count > 0 ? `File Wipe (${count} Selected)` : 'File Wipe Mode') 
-          : 'Full Drive Wipe';
-      }
-
-      if (descEl) {
-        descEl.textContent = isSelective
-          ? (count > 0 ? `Shredding ${count} selected file(s). Remaining drive data will be preserved.` : 'Check the files below that you want to permanently shred.')
-          : 'Erasing 100% of physical storage media and all partitions.';
-      }
-
-      if (bar) {
-        if (isSelective) {
-          bar.style.display = 'flex';
-          if (textEl) {
-            textEl.innerHTML = count > 0
-              ? `🎯 <strong>File Wipe Mode:</strong> ${count} file${count === 1 ? '' : 's'} selected for permanent shredding`
-              : `🎯 <strong>File Wipe Mode:</strong> Select one or more files below using the checkboxes`;
-          }
-        } else {
-          bar.style.display = 'none';
-        }
-      }
+      if (badgeEl) badgeEl.textContent = 'Full Drive Wipe';
+      if (descEl) descEl.textContent = 'Erasing 100% of physical storage media and all partitions.';
 
       const goBtn = document.getElementById('btn-go-phase-2');
       if (goBtn) {
         const span = goBtn.querySelector('span');
-        if (span) {
-          if (isSelective && count > 0) {
-            span.textContent = `Proceed to Shred Selected (${count} File${count === 1 ? '' : 's'})`;
-          } else {
-            span.textContent = 'Continue to Sanitization Method';
-          }
-        }
+        if (span) span.textContent = 'Continue to Sanitization Method';
       }
     };
 
@@ -268,11 +175,6 @@
             <div class="empty-folder-text" style="font-size:13px; font-weight:600;">
               ${this.explorerFilter === 'recoverable' ? 'No recoverable deleted files found' : 'This drive has no files (Clean)'}
             </div>
-            <div style="margin-top:12px;">
-              <button class="btn btn-chip" style="font-size:12px; padding:6px 14px;" onclick="app.quickAddSampleFiles()">
-                + Add Sample Files to Test
-              </button>
-            </div>
           </div>
         `;
         return;
@@ -284,7 +186,6 @@
         const fileSize = file.size || '—';
         const fileStatus = file.status || 'active';
         const recoverability = file.recoverability || '';
-        const isChecked = this.selectedFileNames && this.selectedFileNames.has(fileName);
 
         let fileIcon = `<svg class="file-icon file" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 
@@ -303,21 +204,11 @@
           statusCell = `<span class="status-indicator ${recovClass}"></span> ${recoverability}`;
         }
 
-        const checkboxHtml = `
-          <input type="checkbox" style="margin-right:8px; cursor:pointer; accent-color:var(--cyan-neon);" 
-                 ${isChecked ? 'checked' : ''} 
-                 onchange="app.toggleFileSelection('${fileName.replace(/'/g, "\\'")}', this.checked)" 
-                 onclick="event.stopPropagation()">
-        `;
-
         return `
-          <div class="file-row ${isVolume ? 'folder' : ''} ${isChecked ? 'selected-row' : ''}" 
-               style="${isChecked ? 'background:rgba(0,240,255,0.08); border-left:3px solid var(--cyan-neon);' : ''}"
-               onclick="app.toggleFileSelection('${fileName.replace(/'/g, "\\'")}', ${!isChecked})">
+          <div class="file-row ${isVolume ? 'folder' : ''}">
             <div class="file-name-cell" style="display:flex; align-items:center;">
-              ${checkboxHtml}
               ${fileIcon}
-              <span class="file-name-text" title="${fileName}" style="margin-left:6px; font-weight:${isChecked ? '700' : '400'}; color:${isChecked ? 'var(--cyan-neon)' : 'inherit'};">${fileName}</span>
+              <span class="file-name-text" title="${fileName}" style="margin-left:8px;">${fileName}</span>
             </div>
             <div class="file-size-cell">${fileSize}</div>
             <div class="file-date-cell">${fileType}</div>

@@ -47,6 +47,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
           <span>Verify Certificate</span>
         </button>
+        <button class="nav-tab" id="nav-history-btn" onclick="app.switchView('history')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>History</span>
+        </button>
       </nav>
     </div>
   </header>
@@ -120,13 +124,10 @@
                 </div>
               </div>
 
-              <!-- Big Easy-to-Find Toggle Buttons -->
+              <!-- Drive Mode -->
               <div style="display:flex; align-items:center; gap:6px;">
-                <button type="button" class="btn btn-chip active" id="btn-mode-entire-drive" onclick="app.setWipeMode('entire')" style="font-size:12px; font-weight:700; padding:6px 14px;">
+                <button type="button" class="btn btn-chip active" id="btn-mode-entire-drive" style="font-size:12px; font-weight:700; padding:6px 14px;">
                   Full Drive Wipe
-                </button>
-                <button type="button" class="btn btn-chip" id="btn-mode-selective-files" onclick="app.setWipeMode('selective')" style="font-size:12px; font-weight:700; padding:6px 14px;">
-                  ☑️ Selective File Wipe
                 </button>
               </div>
             </div>
@@ -163,22 +164,6 @@
                   Recoverable (<span id="sidebar-recoverable-count">0</span>)
                 </button>
               </div>
-
-              <!-- Selection helpers shown in File Wipe mode -->
-              <div id="selective-controls" style="display:none; align-items:center; gap:6px;">
-                <button type="button" class="toolbar-btn" onclick="app.selectAllFiles(true)" style="font-size:11px; padding:4px 10px; font-weight:700;">
-                  ✓ Select All
-                </button>
-                <button type="button" class="toolbar-btn" onclick="app.selectAllFiles(false)" style="font-size:11px; padding:4px 10px;">
-                  Clear
-                </button>
-              </div>
-            </div>
-
-            <!-- Targeted Selection Status Bar -->
-            <div id="targeted-selection-bar" style="display:none; padding:8px 14px; background:rgba(0,240,255,0.08); border-bottom:1px solid rgba(0,240,255,0.25); font-size:12px; align-items:center; justify-content:space-between; color:var(--cyan-neon);">
-              <span id="targeted-selection-text">🎯 <strong>File Wipe Mode:</strong> 0 files selected</span>
-              <span style="font-size:11px; opacity:0.85;">Check files below to shred only those items</span>
             </div>
 
             <!-- Explorer Main -->
@@ -425,9 +410,6 @@
 
               <!-- Cryptographic Proof & Ledger Footer -->
               <div class="cert-crypto-footer">
-                <div class="qr-box" id="cert-qr-container">
-                  <!-- QR Code Injected by WipeXQR -->
-                </div>
 
                 <div class="crypto-meta">
                   <div class="crypto-title">Hardware-Bound Cryptographic Proof</div>
@@ -497,6 +479,50 @@
       </div>
     </div>
 
+    <!-- VIEW 3: WIPING & CERTIFICATE HISTORY -->
+    <div id="history-view" class="view-panel">
+      <div class="workflow-content-card">
+        <div class="phase-header-block">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 class="phase-title">Wiping & Certificate History</h2>
+              <p class="phase-desc">View past sanitization sessions, download certificates, and review audit logs.</p>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="btn btn-secondary btn-scan" onclick="app.loadHistory()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+                <span>Refresh</span>
+              </button>
+              <button class="btn btn-secondary text-red" onclick="app.clearHistory()" style="border-color:rgba(239,68,68,0.3); color:#ef4444;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Clear History</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-tab switcher -->
+        <div style="display:flex; gap:4px; padding:12px 20px 0; border-bottom:1px solid var(--border-primary);">
+          <button class="btn btn-chip active" id="history-tab-sessions" onclick="app.switchHistoryTab('sessions')" style="font-size:12px; font-weight:700; padding:6px 14px;">Wipe Sessions</button>
+          <button class="btn btn-chip" id="history-tab-certs" onclick="app.switchHistoryTab('certs')" style="font-size:12px; font-weight:700; padding:6px 14px;">Certificates</button>
+        </div>
+
+        <!-- Sessions Table -->
+        <div id="history-sessions-panel" style="padding:16px 20px;">
+          <div id="history-sessions-table" style="overflow-x:auto;">
+            <p style="color:var(--text-secondary); font-size:13px;">Loading wipe history...</p>
+          </div>
+        </div>
+
+        <!-- Certificates Table -->
+        <div id="history-certs-panel" style="padding:16px 20px; display:none;">
+          <div id="history-certs-table" style="overflow-x:auto;">
+            <p style="color:var(--text-secondary); font-size:13px;">Loading certificate history...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- Scripts -->
@@ -505,7 +531,6 @@
   <script src="js/data/certificateStore.js"></script>
   <script src="js/utils/crypto.js"></script>
   <script src="js/utils/entropy.js"></script>
-  <script src="js/utils/qrGenerator.js"></script>
   <script src="js/app.js"></script>
   <script src="js/app_drive_status.js"></script>
   <script src="js/app_modals.js"></script>

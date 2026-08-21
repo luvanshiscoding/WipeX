@@ -148,7 +148,7 @@ def init_db():
             pre_wipe_nonce TEXT NOT NULL,
             sha256_digest TEXT NOT NULL,
             digital_signature TEXT NOT NULL,
-            qr_payload TEXT NOT NULL,
+            qr_payload TEXT DEFAULT '',
             tamper_detected INTEGER DEFAULT 0,
             verdict TEXT NOT NULL,
             issue_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -307,6 +307,99 @@ def get_wipe_record(wipe_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_all_wipe_records() -> List[Dict[str, Any]]:
+    """Returns all wipe records ordered by most recent first."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            cursor.execute("SELECT * FROM wipe_records ORDER BY started_at DESC LIMIT 100")
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(columns, r)) for r in rows]
+        else:
+            cursor.execute("SELECT * FROM wipe_records ORDER BY started_at DESC LIMIT 100")
+            rows = cursor.fetchall()
+            records = []
+            for row in rows:
+                records.append({
+                    "wipeId": row["wipe_id"],
+                    "deviceId": row["device_id"],
+                    "method": row["method"],
+                    "status": row["status"],
+                    "progress": row["progress"],
+                    "command": row["command"],
+                    "speed": row["speed"],
+                    "startedAt": row["started_at"],
+                    "completedAt": row["completed_at"]
+                })
+            return records
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def get_all_certificates() -> List[Dict[str, Any]]:
+    """Returns all certificates ordered by most recent first."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            cursor.execute("SELECT * FROM certificates ORDER BY issued_at DESC LIMIT 100")
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(columns, r)) for r in rows]
+        else:
+            cursor.execute("SELECT * FROM certificates ORDER BY issue_date DESC LIMIT 100")
+            rows = cursor.fetchall()
+            certs = []
+            for row in rows:
+                certs.append({
+                    "certificateId": row["certificate_id"],
+                    "wipeId": row["wipe_id"],
+                    "deviceModel": row["device_model"],
+                    "serialNumber": row["serial_number"],
+                    "storageType": row["storage_type"],
+                    "capacity": row["capacity"],
+                    "standard": row["standard"],
+                    "methodName": row["method_name"],
+                    "cleanedStatus": row["cleaned_status"],
+                    "trustScore": row["trust_score"],
+                    "trustScoreLabel": row["trust_score_label"],
+                    "auditResult": row["audit_result"],
+                    "preWipeNonce": row["pre_wipe_nonce"],
+                    "sha256Digest": row["sha256_digest"],
+                    "digitalSignature": row["digital_signature"],
+                    "tamperDetected": bool(row["tamper_detected"]),
+                    "verdict": row["verdict"],
+                    "issueDate": row["issue_date"]
+                })
+            return certs
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def clear_all_history() -> bool:
+    """Clears all historical wipe records and certificates from the database."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            cursor.execute("TRUNCATE TABLE certificates, wipe_records")
+        else:
+            cursor.execute("DELETE FROM certificates")
+            cursor.execute("DELETE FROM wipe_records")
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
 def save_certificate(cert: Dict[str, Any]) -> None:
     """Persists a compliance certificate to database ledger."""
     conn = get_db_connection()
@@ -335,7 +428,7 @@ def save_certificate(cert: Dict[str, Any]) -> None:
             cert["preWipeNonce"],
             cert["sha256Digest"],
             cert["digitalSignature"],
-            cert["qrPayload"],
+            cert.get("qrPayload", ""),
             bool(cert.get("tamperDetected")),
             cert["verdict"]
         ))
@@ -363,7 +456,7 @@ def save_certificate(cert: Dict[str, Any]) -> None:
             cert["preWipeNonce"],
             cert["sha256Digest"],
             cert["digitalSignature"],
-            cert["qrPayload"],
+            cert.get("qrPayload", ""),
             1 if cert.get("tamperDetected") else 0,
             cert["verdict"],
             cert["issueDate"]

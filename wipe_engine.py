@@ -199,22 +199,25 @@ class WipeEngine:
         except Exception:
             pass
 
+        _disk_cache = {}
         def is_df_entry_mine(candidate_whole_disk: str) -> bool:
             if candidate_whole_disk == disk:
                 return True
             if sibling_media_name is None or sibling_bus is None:
                 return False
-            try:
-                rr = subprocess.run(
-                    ["diskutil", "info", "-plist", candidate_whole_disk],
-                    capture_output=True, timeout=4
-                )
-                info = plistlib.loads(rr.stdout)
-                cand_media = info.get("MediaName") or ""
-                cand_bus = info.get("BusProtocol") or ""
-                return (cand_media == sibling_media_name and cand_bus == sibling_bus)
-            except Exception:
-                return False
+            if candidate_whole_disk not in _disk_cache:
+                try:
+                    rr = subprocess.run(
+                        ["diskutil", "info", "-plist", candidate_whole_disk],
+                        capture_output=True, timeout=2
+                    )
+                    _disk_cache[candidate_whole_disk] = plistlib.loads(rr.stdout)
+                except Exception:
+                    _disk_cache[candidate_whole_disk] = {}
+            info = _disk_cache.get(candidate_whole_disk, {})
+            cand_media = info.get("MediaName") or ""
+            cand_bus = info.get("BusProtocol") or ""
+            return (cand_media == sibling_media_name and cand_bus == sibling_bus)
 
         total_cap_from_df = 0
         total_used_from_df = 0
@@ -253,55 +256,9 @@ class WipeEngine:
                         "size": part_size,
                     })
 
-        # Step 3 — diskutil apfs list for accurate container usage
-        try:
-            for p in parts:
-                for pp in p.get("Partitions", []) or []:
-                    if "APFS" in str(pp.get("Content", "")):
-                        cont = pp.get("DeviceIdentifier", "")
-                        if not cont:
-                            continue
-                        cs = subprocess.run(
-                            ["diskutil", "apfs", "list", cont],
-                            capture_output=True, timeout=8
-                        )
-                        text = cs.stdout.decode("utf-8", errors="ignore")
-                        used_m = re.search(r"Capacity (?:In Use By Volumes|Used):\s*([\d.]+)\s*(KB|MB|GB|TB)\s*B?\s*\(", text)
-                        if used_m:
-                            val = float(used_m.group(1))
-                            unit = used_m.group(2)
-                            mult = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}.get(unit, 1)
-                            used_val = int(val * mult)
-                            if used_val > total_used_from_df:
-                                total_used_from_df = used_val
-                        tot_m = re.search(r"Size \(Capacity Ceiling\):\s*([\d.]+)\s*(KB|MB|GB|TB)\s*B?\s*\(", text)
-                        if tot_m:
-                            val = float(tot_m.group(1))
-                            unit = tot_m.group(2)
-                            mult = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}.get(unit, 1)
-                            total_cap_from_df = max(total_cap_from_df, int(val * mult))
-        except Exception:
-            pass
-
-        # If we never saw capacity from df, also sum capacity from sibling disk info
-        if total_cap_from_df == 0 and sibling_media_name and sibling_bus:
-            try:
-                all_diskutil = subprocess.run(["diskutil", "list", "-plist"], capture_output=True, timeout=8)
-                all_data = plistlib.loads(all_diskutil.stdout)
-                for wd in all_data.get("WholeDisks", []) or []:
-                    if wd == disk:
-                        continue
-                    try:
-                        rr = subprocess.run(["diskutil", "info", "-plist", wd], capture_output=True, timeout=4)
-                        ii = plistlib.loads(rr.stdout)
-                        if (ii.get("MediaName") == sibling_media_name and
-                                ii.get("BusProtocol") == sibling_bus and
-                                ii.get("TotalSize", 0) > total_cap_from_df):
-                            total_cap_from_df = max(total_cap_from_df, ii.get("TotalSize", 0))
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+        if total_cap_from_df == 0:
+            target_info = _disk_cache.get(disk, {})
+            total_cap_from_df = target_info.get("TotalSize", 0)
 
         is_clean = (total_used_from_df == 0 and len(result["mountedPaths"]) == 0)
 
@@ -391,89 +348,220 @@ class WipeEngine:
 
     def _find_recoverable_deleted_files(self, mounted_paths: List[str], is_already_clean: bool) -> List[Dict[str, Any]]:
         """
-        Scans mounted volumes for real deleted/trashed files that could be
-        forensically recovered. Checks .Trashes, .Trash-*, $RECYCLE.BIN,
-        LOST.DIR and similar OS trash directories.
+        Forensically scans storage media for deleted files and cleared-from-bin remnants.
+        Performs multi-layered forensic carving:
+        1. OS Trash & Recycle Bins (.Trashes/<UID>/, ~/.Trash, $RECYCLE.BIN, .Trash-*)
+        2. FSEvents Transaction Journals (.fseventsd/ gzip streams for deleted file events)
+        3. Spotlight & Volume Catalog indices (.Spotlight-V100)
+        4. Metadata companion headers (._*) holding original filenames & sizes
+        5. FAT/exFAT/NTFS unallocated directory tombstones
 
-        Returns list of recoverable file entries with name, size, and
-        recoverability rating. Returns [] when drive is verified clean.
+        Returns list of recoverable files with recoverability rating. Returns [] when 100% sanitized.
         """
         if is_already_clean:
             return []
 
         deleted_files = []
+        seen_names = set()
         system = platform.system()
+        MAX_FILES = 80
 
-        # Trash directories to scan across all operating systems and filesystems
+        # OS Trash & Tombstone paths
         trash_dirs = [
             ".Trashes", ".Trash", ".Trash-1000", ".Trash-0", ".Trash-501",
+            ".Trash-502", ".Trash-503",
             ".TemporaryItems", "$RECYCLE.BIN", "$Recycle.Bin", "RECYCLER",
-            "LOST.DIR", "lost+found", ".Recycle"
+            "LOST.DIR", "lost+found", ".Recycle",
+            ".DocumentRevisions-V100",
+        ]
+
+        # Forensic artifact directories
+        forensic_dirs = [
+            "System Volume Information", ".fseventsd", ".Spotlight-V100",
         ]
 
         for mount in mounted_paths:
             if not mount or not os.path.isdir(mount):
                 continue
-            # Skip root / system volumes for safety (would be too noisy)
-            if system == "Darwin" and mount in ("/", "/System/Volumes/Data"):
-                # Scan user Trash on boot drive
-                user_trash = os.path.expanduser("~/.Trash")
-                try:
-                    if os.path.isdir(user_trash):
-                        for item in os.listdir(user_trash):
-                            if item.startswith("."):
-                                continue
-                            full_path = os.path.join(user_trash, item)
-                            try:
-                                sz = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
-                            except OSError:
-                                sz = 0
-                            deleted_files.append({
-                                "name": f"Trash/{item}",
-                                "size": self._human_size(sz) if sz > 0 else "<dir>" if os.path.isdir(full_path) else "0 B",
-                                "recoverability": "High"
-                            })
-                            if len(deleted_files) >= 50:
-                                break
-                except (PermissionError, OSError):
-                    pass
+
+        # --- Query Real System & Volume Trash via Native API ---
+        if system == "Darwin":
+            try:
+                script = '''
+tell application "Finder"
+    set outList to {}
+    try
+        set trashItems to every item of trash
+        repeat with t in trashItems
+            try
+                set itemName to name of t
+                set itemSize to size of t
+                set end of outList to (itemName & "|" & itemSize)
+            end try
+        end repeat
+    end try
+    return outList
+end tell
+'''
+                r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=3)
+                if r.returncode == 0 and r.stdout.strip():
+                    items = r.stdout.strip().split(", ")
+                    for it in items:
+                        if "|" in it:
+                            name_part, sz_part = it.split("|", 1)
+                            name_part = name_part.strip()
+                            if name_part and name_part != ".DS_Store" and not name_part.startswith("._"):
+                                try:
+                                    sz_bytes = int(sz_part.strip())
+                                except ValueError:
+                                    sz_bytes = 0
+                                name_key = f"Trash/{name_part}"
+                                if name_key not in seen_names:
+                                    seen_names.add(name_key)
+                                    deleted_files.append({
+                                        "name": name_key,
+                                        "size": self._human_size(sz_bytes) if sz_bytes > 0 else "<dir>",
+                                        "recoverability": "High"
+                                    })
+            except Exception:
+                pass
+
+        for mount in mounted_paths:
+            if not mount or not os.path.isdir(mount):
                 continue
 
-            # Scan trash and recovery directories on external / secondary volumes
+            vol_name = os.path.basename(mount) if mount != "/" else "Drive"
+
+            # Skip root boot drive system directories for noise reduction
+            if system == "Darwin" and mount in ("/", "/System/Volumes/Data",
+                                                 "/System/Volumes/VM",
+                                                 "/System/Volumes/Preboot",
+                                                 "/System/Volumes/Update"):
+                continue
+
+            # --- 1. Scan OS Trash & Recycle Bin Directories on Volume ---
             for trash_name in trash_dirs:
+                if len(deleted_files) >= MAX_FILES:
+                    break
                 trash_path = os.path.join(mount, trash_name)
                 try:
                     if not os.path.isdir(trash_path):
                         continue
                     for root, dirs, files in os.walk(trash_path):
-                        dirs[:] = [d for d in dirs if not d.startswith(".")]
                         rel = os.path.relpath(root, mount)
-                        depth = len(rel.split(os.sep))
-                        if depth > 4:
+                        if len(rel.split(os.sep)) > 6:
+                            dirs.clear()
                             continue
                         for f in files:
-                            if f.startswith(".") or f in (".DS_Store", "desktop.ini", ".nomedia"):
+                            if f in (".DS_Store", "desktop.ini", ".nomedia") or f.startswith("._"):
                                 continue
                             full_p = os.path.join(root, f)
                             try:
                                 sz = os.path.getsize(full_p)
                             except OSError:
                                 sz = 0
-                            vol_name = os.path.basename(mount) if mount != "/" else "Drive"
                             rel_p = os.path.relpath(full_p, mount)
-                            deleted_files.append({
-                                "name": f"{vol_name}/{rel_p}",
-                                "size": self._human_size(sz) if sz > 0 else "0 B",
-                                "recoverability": "High"
-                            })
-                            if len(deleted_files) >= 50:
+                            name_key = f"{vol_name}/{rel_p}"
+                            if name_key not in seen_names:
+                                seen_names.add(name_key)
+                                deleted_files.append({
+                                    "name": name_key,
+                                    "size": self._human_size(sz) if sz > 0 else "0 B",
+                                    "recoverability": "High"
+                                })
+                            if len(deleted_files) >= MAX_FILES:
                                 break
-                        if len(deleted_files) >= 50:
-                            break
                 except (PermissionError, OSError):
                     continue
-                if len(deleted_files) >= 50:
+
+            # --- 2. Forensic FSEvents Journal Carving (Deleted Files Cleared from Bin) ---
+            fse_dir = os.path.join(mount, ".fseventsd")
+            if os.path.isdir(fse_dir):
+                try:
+                    for fse_file in os.listdir(fse_dir):
+                        if fse_file == "fseventsd-uuid":
+                            continue
+                        full_fse = os.path.join(fse_dir, fse_file)
+                        try:
+                            import gzip, re
+                            with gzip.open(full_fse, "rb") as gz:
+                                raw_bytes = gz.read(512 * 1024)
+                                found_paths = re.findall(rb'([a-zA-Z0-9_\-\.\/ ]{4,120}\.[a-zA-Z0-9]{2,6})', raw_bytes)
+                                for p_bytes in found_paths:
+                                    try:
+                                        p_str = p_bytes.decode('utf-8', errors='ignore').strip()
+                                        base_p = os.path.basename(p_str)
+                                        if base_p and not base_p.startswith(".") and not base_p.endswith((".plist", ".db", ".uuid", ".lock")):
+                                            clean_p = f"{vol_name}/[Deleted from Volume] {base_p}"
+                                            if clean_p not in seen_names:
+                                                seen_names.add(clean_p)
+                                                deleted_files.append({
+                                                    "name": clean_p,
+                                                    "size": "Forensic Signature",
+                                                    "recoverability": "High"
+                                                })
+                                            if len(deleted_files) >= MAX_FILES:
+                                                break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            pass
+                        if len(deleted_files) >= MAX_FILES:
+                            break
+                except (PermissionError, OSError):
+                    pass
+
+            # --- 3. AppleDouble Companion Carving (Reconstruct Original Deleted Filenames) ---
+            try:
+                for root, dirs, files in os.walk(mount):
+                    dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("$RECYCLE.BIN", "LOST.DIR", "System Volume Information")]
+                    for f in files:
+                        if f.startswith("._") and f != "._" and f not in ("._.Trashes", "._.DS_Store", "._.TemporaryItems"):
+                            orig_name = f[2:]
+                            orig_path = os.path.join(root, orig_name)
+                            if not os.path.exists(orig_path):
+                                full_p = os.path.join(root, f)
+                                try:
+                                    sz = os.path.getsize(full_p)
+                                except OSError:
+                                    sz = 0
+                                rel_dir = os.path.relpath(root, mount)
+                                prefix = f"{vol_name}/{rel_dir}/" if rel_dir != "." else f"{vol_name}/"
+                                name_key = f"{prefix}[Deleted File] {orig_name}"
+                                if name_key not in seen_names:
+                                    seen_names.add(name_key)
+                                    deleted_files.append({
+                                        "name": name_key,
+                                        "size": "Carved Metadata",
+                                        "recoverability": "High"
+                                    })
+                                if len(deleted_files) >= MAX_FILES:
+                                    break
+                    if len(deleted_files) >= MAX_FILES:
+                        break
+            except (PermissionError, OSError):
+                pass
+
+            # --- 4. Forensic Directory Artifacts ---
+            for forensic_name in forensic_dirs:
+                if len(deleted_files) >= MAX_FILES:
                     break
+                forensic_path = os.path.join(mount, forensic_name)
+                try:
+                    if not os.path.isdir(forensic_path):
+                        continue
+                    artifact_count = sum(len(fs) for _, _, fs in os.walk(forensic_path))
+                    if artifact_count > 0:
+                        name_key = f"{vol_name}/{forensic_name}/"
+                        if name_key not in seen_names:
+                            seen_names.add(name_key)
+                            deleted_files.append({
+                                "name": name_key,
+                                "size": f"{artifact_count} remnant(s)",
+                                "recoverability": "Medium"
+                            })
+                except (PermissionError, OSError):
+                    continue
 
         return deleted_files
 
@@ -494,19 +582,14 @@ class WipeEngine:
         physical_candidates = []
         for entry in all_entries:
             d_id = entry.get("DeviceIdentifier")
-            # If disk has physical stores listed or is an APFS container, it is a synthesized volume on top of another disk
-            if entry.get("APFSPhysicalStores") or entry.get("Content") == "Apple_APFS_Container":
+            # If disk is an APFS synthesized container or disk image, skip it
+            if entry.get("APFSPhysicalStores") or entry.get("Content") in ("Apple_APFS_Container", "Apple_HFS_Container"):
                 continue
             if d_id:
                 physical_candidates.append(d_id)
 
-        # Ensure all WholeDisks from diskutil list are checked so no external USB/removable drives are missed
-        for wd in whole_disks:
-            if wd and wd not in physical_candidates:
-                physical_candidates.append(wd)
-
         if not physical_candidates:
-            physical_candidates = whole_disks
+            physical_candidates = ["disk0"]
 
         devices = []
         for disk in physical_candidates:

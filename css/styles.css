@@ -1805,19 +1805,6 @@ body:not(.demo-mode-active) .demo-only-feature {
   padding-top: 18px;
 }
 
-.qr-box {
-  width: 84px;
-  height: 84px;
-  background: #ffffff !important;
-  border: 1.5px solid #0f172a !important;
-  border-radius: 4px;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .crypto-meta {
   flex: 1;
 }

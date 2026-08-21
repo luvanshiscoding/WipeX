@@ -138,18 +138,24 @@ class WipeXApp {
 
   async fetchBackend(endpoint, options = {}) {
     const origins = [
+      '',
       this.apiBaseUrl,
       'http://localhost:8000',
-      'http://127.0.0.1:8000',
-      ''
+      'http://127.0.0.1:8000'
     ];
-    for (const base of origins) {
-      try {
-        const url = base ? `${base}${endpoint}` : endpoint;
-        const res = await fetch(url, { ...options, cache: 'no-store' });
-        if (res && res.ok) return res;
-      } catch (e) {
-        // try next fallback
+    const endpointsToTry = [endpoint];
+    if (endpoint === '/api/devices') endpointsToTry.push('/api/drives');
+    else if (endpoint === '/api/drives') endpointsToTry.push('/api/devices');
+
+    for (const ep of endpointsToTry) {
+      for (const base of origins) {
+        try {
+          const url = base ? `${base}${ep}` : ep;
+          const res = await fetch(url, { ...options, cache: 'no-store' });
+          if (res && res.ok) return res;
+        } catch (e) {
+          // try next fallback
+        }
       }
     }
     return null;
@@ -184,7 +190,7 @@ class WipeXApp {
         const res = await this.fetchBackend('/api/devices');
         if (!res || !res.ok) return;
         const latestReal = await res.json();
-        if (!Array.isArray(latestReal)) return;
+        if (!Array.isArray(latestReal) || latestReal.length === 0) return;
 
         const currentKeys = new Set((this.devices || []).map(d => d.devicePath || d.id));
         const latestKeys = new Set(latestReal.map(d => d.devicePath || d.id));
@@ -192,7 +198,7 @@ class WipeXApp {
         const added = latestReal.filter(d => !currentKeys.has(d.devicePath || d.id));
         const removed = (this.devices || []).filter(d => !latestKeys.has(d.devicePath || d.id));
 
-        if (added.length > 0 || removed.length > 0 || ((!this.devices || this.devices.length === 0) && latestReal.length > 0)) {
+        if (added.length > 0 || removed.length > 0 || (!this.devices || this.devices.length === 0)) {
           this.devices = latestReal;
 
           if (added.length > 0) {
@@ -323,20 +329,24 @@ class WipeXApp {
     let devices = [];
 
     if (this.demoMode) {
-      // In DEMO MODE: Show ONLY the interactive scenario presets, NO real hardware
+      // In DEMO MODE: Show the interactive scenario presets
       devices = (window.MOCK_DEVICES || []).map(d => ({ ...d }));
     } else {
-      // In REAL HARDWARE MODE: Fetch and show ONLY real physical connected devices via backend probe
+      // In REAL HARDWARE MODE: Fetch and show real physical connected devices via backend probe
       try {
         const res = await this.fetchBackend('/api/devices');
         if (res && res.ok) {
-          devices = await res.json();
-        } else {
-          // If backend offline, show informative warning
-          this.showStepBlockedToast("⚠️ Backend API offline on port 8000. Connect backend or enable Demo Mode.");
+          const fetched = await res.json();
+          if (Array.isArray(fetched) && fetched.length > 0) {
+            devices = fetched;
+          }
         }
       } catch (e) {
         devices = [];
+      }
+
+      if (devices.length === 0 && this.devices && this.devices.length > 0) {
+        devices = this.devices;
       }
     }
 
@@ -392,6 +402,145 @@ class WipeXApp {
       document.getElementById('nav-verify-btn')?.classList.add('active');
       document.getElementById('portal-view')?.classList.add('active');
       this.verifyLookup();
+    } else if (viewName === 'history') {
+      document.getElementById('nav-history-btn')?.classList.add('active');
+      document.getElementById('history-view')?.classList.add('active');
+      this.loadHistory();
+    }
+  }
+
+  async loadHistory() {
+    try {
+      const [sessRes, certRes] = await Promise.all([
+        this.fetchBackend('/api/wipe/sessions'),
+        this.fetchBackend('/api/certificates')
+      ]);
+      const sessions = sessRes?.ok ? await sessRes.json() : [];
+      const certData = certRes?.ok ? await certRes.json() : {};
+      this._historySessions = Array.isArray(sessions) ? sessions : [];
+      this._historyCerts = Array.isArray(certData.certificates) ? certData.certificates : [];
+      this.renderSessionsTable();
+      this.renderCertsTable();
+    } catch (e) {
+      console.error('Failed to load history:', e);
+    }
+  }
+
+  switchHistoryTab(tab) {
+    const sessBtn = document.getElementById('history-tab-sessions');
+    const certBtn = document.getElementById('history-tab-certs');
+    const sessPanel = document.getElementById('history-sessions-panel');
+    const certPanel = document.getElementById('history-certs-panel');
+    if (tab === 'sessions') {
+      sessBtn?.classList.add('active');
+      certBtn?.classList.remove('active');
+      if (sessPanel) sessPanel.style.display = 'block';
+      if (certPanel) certPanel.style.display = 'none';
+    } else {
+      sessBtn?.classList.remove('active');
+      certBtn?.classList.add('active');
+      if (sessPanel) sessPanel.style.display = 'none';
+      if (certPanel) certPanel.style.display = 'block';
+    }
+  }
+
+  renderSessionsTable() {
+    const container = document.getElementById('history-sessions-table');
+    if (!container) return;
+    const sessions = this._historySessions || [];
+    if (sessions.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-secondary); font-size:13px; padding:20px 0;">No wipe sessions found. Complete a drive sanitization to see history here.</p>';
+      return;
+    }
+    const statusIcon = (s) => s === 'COMPLETED' ? '✅' : s === 'FAILED' ? '❌' : '⏳';
+    let html = `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead><tr style="border-bottom:2px solid var(--border-primary); text-align:left;">
+        <th style="padding:8px 10px;">Session ID</th>
+        <th style="padding:8px 10px;">Device</th>
+        <th style="padding:8px 10px;">Method</th>
+        <th style="padding:8px 10px;">Status</th>
+        <th style="padding:8px 10px;">Started</th>
+        <th style="padding:8px 10px;">Completed</th>
+        <th style="padding:8px 10px;">Command</th>
+      </tr></thead><tbody>`;
+    for (const s of sessions) {
+      const started = s.startedAt ? new Date(s.startedAt).toLocaleString() : '—';
+      const completed = s.completedAt ? new Date(s.completedAt).toLocaleString() : '—';
+      html += `<tr style="border-bottom:1px solid var(--border-primary);">
+        <td style="padding:8px 10px; font-family:'JetBrains Mono',monospace; font-size:11px;">${s.wipeId || '—'}</td>
+        <td style="padding:8px 10px;">${s.deviceId || '—'}</td>
+        <td style="padding:8px 10px;">${s.method || '—'}</td>
+        <td style="padding:8px 10px;">${statusIcon(s.status)} ${s.status || '—'}</td>
+        <td style="padding:8px 10px; font-size:11px;">${started}</td>
+        <td style="padding:8px 10px; font-size:11px;">${completed}</td>
+        <td style="padding:8px 10px; font-size:11px; font-family:'JetBrains Mono',monospace; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(s.command||'').replace(/"/g,'&quot;')}">${s.command || '—'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  renderCertsTable() {
+    const container = document.getElementById('history-certs-table');
+    if (!container) return;
+    const certs = this._historyCerts || [];
+    if (certs.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-secondary); font-size:13px; padding:20px 0;">No certificates generated yet. Complete a wipe and generate a certificate to see it here.</p>';
+      return;
+    }
+    let html = `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead><tr style="border-bottom:2px solid var(--border-primary); text-align:left;">
+        <th style="padding:8px 10px;">Certificate ID</th>
+        <th style="padding:8px 10px;">Device</th>
+        <th style="padding:8px 10px;">Serial</th>
+        <th style="padding:8px 10px;">Method</th>
+        <th style="padding:8px 10px;">Status</th>
+        <th style="padding:8px 10px;">Verdict</th>
+        <th style="padding:8px 10px;">Issued</th>
+        <th style="padding:8px 10px;">Actions</th>
+      </tr></thead><tbody>`;
+    for (const c of certs) {
+      const issued = c.issueDate ? new Date(c.issueDate).toLocaleString() : '—';
+      const verdictColor = c.verdict === 'SAFE TO REUSE OR RESELL' ? '#22c55e' : c.verdict === 'SHRED REQUIRED' ? '#ef4444' : '#eab308';
+      html += `<tr style="border-bottom:1px solid var(--border-primary);">
+        <td style="padding:8px 10px; font-family:'JetBrains Mono',monospace; font-size:11px;">${c.certificateId || '—'}</td>
+        <td style="padding:8px 10px;">${c.deviceModel || '—'}</td>
+        <td style="padding:8px 10px; font-family:'JetBrains Mono',monospace; font-size:11px;">${c.serialNumber || '—'}</td>
+        <td style="padding:8px 10px; font-size:11px;">${c.methodName || c.standard || '—'}</td>
+        <td style="padding:8px 10px;">${c.cleanedStatus || '—'}</td>
+        <td style="padding:8px 10px; color:${verdictColor}; font-weight:700; font-size:11px;">${c.verdict || '—'}</td>
+        <td style="padding:8px 10px; font-size:11px;">${issued}</td>
+        <td style="padding:8px 10px;"><button class="btn btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="app.viewHistoricalCert('${c.certificateId}')">View</button></td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  viewHistoricalCert(certId) {
+    this.switchView('portal');
+    const input = document.getElementById('portal-search-input');
+    if (input) {
+      input.value = certId;
+      this.verifyLookup();
+    }
+  }
+
+  async clearHistory() {
+    if (!confirm('Are you sure you want to permanently clear all wiping logs and certificates?')) return;
+    try {
+      const res = await this.fetchBackend('/api/history/clear', { method: 'POST' });
+      if (res && res.ok) {
+        this._historySessions = [];
+        this._historyCerts = [];
+        this.renderSessionsTable();
+        this.renderCertsTable();
+        this.showStepBlockedToast('Wiping & Certificate History Cleared');
+      } else {
+        alert('Failed to clear history from backend.');
+      }
+    } catch (e) {
+      console.error('Error clearing history:', e);
     }
   }
 
@@ -957,16 +1106,6 @@ class WipeXApp {
 
     const shaEl = document.getElementById('cert-sha256');
     if (shaEl) shaEl.textContent = sha256Hash;
-
-    // Compact RFC-compliant verification URL for instant mobile & camera QR scan
-    const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'https://wipex.app';
-    const qrUrl = `${origin}${window.location.pathname}?verify=${encodeURIComponent(certId)}`;
-
-    const qrContainer = document.getElementById('cert-qr-container');
-    const qrHelper = window.WipeXQR || window.AegisQR;
-    if (qrHelper && qrContainer) {
-      qrHelper.renderQR(qrContainer, qrUrl);
-    }
   }
 
   printCertificate() {
