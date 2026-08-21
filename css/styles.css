@@ -1032,6 +1032,84 @@ body:not(.demo-mode-active) .demo-only-feature {
   padding: 0;
 }
 
+/* File Row & Explorer Table Grid */
+.file-row {
+  display: grid;
+  grid-template-columns: 2fr 90px 80px 120px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+}
+
+.file-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.file-row.folder {
+  background: rgba(0, 240, 255, 0.03);
+}
+
+.file-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-name-text {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size-cell {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.file-date-cell {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.file-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.status-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-indicator.active {
+  background: var(--emerald-neon);
+  box-shadow: 0 0 6px var(--emerald-neon);
+}
+
+.status-indicator.recoverable,
+.status-indicator.warning {
+  background: var(--amber-neon);
+  box-shadow: 0 0 6px var(--amber-neon);
+}
+
+.status-indicator.danger {
+  background: var(--red-neon);
+  box-shadow: 0 0 6px var(--red-neon);
+}
+
 /* Tree View Styles */
 .tree-row {
   display: flex;

@@ -150,21 +150,6 @@
             </div>
           </div>
 
-          <!-- Demo Scenario Presets Bar (Visible in Demo Mode) -->
-          <div class="demo-scenario-bar demo-only-feature">
-            <div class="demo-bar-title">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-              <span>Demo Test Presets:</span>
-            </div>
-            <div class="demo-chips">
-              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-nvme-samsung-980')">🟢 Samsung 980 NVMe (Clean)</button>
-              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-sandisk-hpa-hidden')">🔒 SanDisk 512GB (Hidden HPA)</button>
-              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-hdd-seagate-barracuda')">🟢 Seagate 2TB (Magnetic HDD)</button>
-              <button type="button" class="btn-chip text-red" onclick="app.selectDeviceById('dev-ssd-kingston-damaged')">🔴 Kingston 480GB (Damaged/Shred)</button>
-              <button type="button" class="btn-chip" onclick="app.selectDeviceById('dev-crucial-clean-256')">⚡ Crucial 256GB (Pre-Sanitized)</button>
-            </div>
-          </div>
-
           <div class="device-card-list" id="device-card-list">
             <!-- Populated dynamically -->
           </div>
@@ -333,14 +318,6 @@
             <div id="wipe-complete-banner" class="simple-alert-box alert-green" style="display:none; margin-top:16px; text-align:center;">
               <span style="font-size:15px; font-weight:700;">✓ Data Erasure Completed (100%)</span>
               <div style="font-size:12px; margin-top:4px; opacity:0.9;">All media sectors sanitized. Advancing to independent verification check...</div>
-            </div>
-
-            <!-- Demo Fast-Forward Button (Visible in Demo Mode) -->
-            <div class="demo-fast-forward demo-only-feature" style="margin-top: 16px; display: flex; justify-content: center;">
-              <button type="button" class="btn btn-chip" onclick="app.fastForwardWipe()">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
-                <span>Fast-Forward Wipe (Instant Demo)</span>
-              </button>
             </div>
 
           </div>

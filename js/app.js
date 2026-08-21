@@ -139,22 +139,26 @@ class WipeXApp {
   async fetchBackend(endpoint, options = {}) {
     const origins = [
       '',
-      this.apiBaseUrl,
+      'http://127.0.0.1:8000',
       'http://localhost:8000',
-      'http://127.0.0.1:8000'
+      this.apiBaseUrl
     ];
+    const uniqueOrigins = Array.from(new Set(origins.filter(Boolean)));
     const endpointsToTry = [endpoint];
     if (endpoint === '/api/devices') endpointsToTry.push('/api/drives');
     else if (endpoint === '/api/drives') endpointsToTry.push('/api/devices');
 
     for (const ep of endpointsToTry) {
-      for (const base of origins) {
+      for (const base of uniqueOrigins) {
         try {
-          const url = base ? `${base}${ep}` : ep;
-          const res = await fetch(url, { ...options, cache: 'no-store' });
+          const url = base.endsWith('/') ? `${base.slice(0, -1)}${ep}` : `${base}${ep}`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          const res = await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
+          clearTimeout(timeoutId);
           if (res && res.ok) return res;
         } catch (e) {
-          // try next fallback
+          // try next origin
         }
       }
     }
@@ -854,6 +858,14 @@ class WipeXApp {
     this.updatePhase1ContinueBtn();
     this.renderMethodOptions();
     this.renderStepper();
+
+    // Smoothly scroll to the drive explorer panel so the continue button and files are immediately visible
+    setTimeout(() => {
+      const panel = document.getElementById('drive-status-panel');
+      if (panel && panel.style.display !== 'none') {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 80);
   }
 
   /* STEP 2: SANITIZATION METHODS */
