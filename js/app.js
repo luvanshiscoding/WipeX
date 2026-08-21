@@ -180,6 +180,8 @@ class WipeXApp {
     this.demoMode = enabled;
     localStorage.setItem('wipex_demo_mode', enabled ? '1' : '0');
     this.applyDemoMode();
+    this.devices = []; // Clear immediately so stale preset/hardware list is never mixed
+    this.selectedDevice = null;
     this.loadDevices();
   }
 
