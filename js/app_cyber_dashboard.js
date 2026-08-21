@@ -391,8 +391,15 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Boot the global background animation
+    // Boot the global background animation immediately
     const globalBg = new GlobalBgCanvas();
     globalBg.init();
+
+    // Boot dashboard typewriter after app is initialized (small delay ensures WipeXApp.init() is done)
+    setTimeout(() => {
+      if (window.app && typeof window.app.initDashboardAnimations === "function") {
+        window.app.initDashboardAnimations();
+      }
+    }, 200);
   });
 })();

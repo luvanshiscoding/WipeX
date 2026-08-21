@@ -123,12 +123,7 @@ class WipeXApp {
     this.renderMethodOptions();
     this.initCanvas();
     await this.loadDevices();
-    // Defer dashboard init to ensure app_cyber_dashboard.js has attached the method
-    setTimeout(() => {
-      if (typeof this.initDashboardAnimations === 'function') {
-        this.initDashboardAnimations();
-      }
-    }, 50);
+    this.startAutoDetection();
 
     // Check if user opened page via a scanned QR code with verification parameters
     const params = new URLSearchParams(window.location.search);
