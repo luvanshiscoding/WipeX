@@ -488,6 +488,17 @@ class WipeXApp {
       }
     }
 
+    // Also include any dynamically logged wipe sessions in this current browser session
+    if (this._dynamicSessions && Array.isArray(this._dynamicSessions)) {
+      const existingSessionIds = new Set(sessions.map(s => s.wipeId));
+      for (const s of this._dynamicSessions) {
+        if (!existingSessionIds.has(s.wipeId)) {
+          sessions.unshift(s);
+          existingSessionIds.add(s.wipeId);
+        }
+      }
+    }
+
     // Also include any dynamically issued certificates in this session
     if (this.certificateStore) {
       const existingCertIds = new Set(certs.map(c => c.certificateId));
@@ -959,10 +970,16 @@ class WipeXApp {
     if (fillEl) fillEl.style.width = `${this.wipeProgress}%`;
 
     if (etaEl) {
-      if (this.wipeProgress >= 100) etaEl.textContent = "Done";
-      else {
-        const sec = Math.max(1, Math.round(((100 - this.wipeProgress) / 100) * 6));
-        etaEl.textContent = `00:0${sec}s`;
+      if (this.wipeProgress >= 100) {
+        etaEl.textContent = "Complete";
+      } else {
+        // Calculate remaining seconds dynamically (estimated 12-16s total wipe span)
+        const remainingPct = 100 - this.wipeProgress;
+        const totalEstimatedSecs = this.demoMode ? 14 : 25;
+        const sec = Math.max(1, Math.round((remainingPct / 100) * totalEstimatedSecs));
+        const mins = Math.floor(sec / 60);
+        const secs = sec % 60;
+        etaEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}s`;
       }
     }
   }

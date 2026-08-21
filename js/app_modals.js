@@ -368,7 +368,7 @@
           }
         }, 40);
       } else {
-        // Fallback simulation timer (Demo Mode)
+        // Fallback simulation timer (Demo Mode - smooth ~12-14 second realistic hardware simulation)
         this.wipeInterval = setInterval(() => {
           if (currentCluster < totalClusters) {
             if (currentCluster > 0) {
@@ -376,7 +376,7 @@
             }
             self.sectorStates[currentCluster] = 1;
             currentCluster++;
-            self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
+            self.wipeProgress = Math.min(99, Math.round((currentCluster / totalClusters) * 100));
             self.updateWipeUI();
             self.drawCanvas();
           } else {
@@ -392,6 +392,18 @@
             self._applyPostWipeFileCleanup();
             self.updateWipeUI();
             self.drawCanvas();
+
+            // Record dynamic session in history ledger
+            if (!self._dynamicSessions) self._dynamicSessions = [];
+            self._dynamicSessions.unshift({
+              wipeId: `WIPE-SESSION-${Date.now().toString(16).toUpperCase()}`,
+              deviceId: self.selectedDevice ? self.selectedDevice.id : "DEV-DEMO",
+              method: self.selectedMethodId || "purge-nvme-crypto",
+              status: isDamaged ? "FAILED" : "COMPLETED",
+              startedAt: new Date(Date.now() - 14000).toISOString(),
+              completedAt: new Date().toISOString(),
+              command: isDamaged ? "Hardware fault detected during controller write test" : "Direct Controller Purge + Multi-Pass Verification"
+            });
 
             const titleEl = document.getElementById('wipe-phase-title');
             const descEl = document.getElementById('wipe-phase-desc');
@@ -412,7 +424,7 @@
               }
             }, 1600);
           }
-        }, 40);
+        }, 55);
       }
     };
 

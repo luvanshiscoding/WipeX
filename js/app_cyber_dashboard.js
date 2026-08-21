@@ -1,22 +1,23 @@
 /**
  * WipeX - 3D Cybersecurity Canvas & Feature Line-by-Line Typewriter Engine
- * Renders an interactive 3D particle constellation with cyber horizon grid,
- * and types out feature highlights smoothly line-by-line in the terminal.
+ * Interactive 3D particle constellation, cyber horizon grid, floating cryptographic nodes
+ * (ECDSA, LBA Sectors, Shannon Entropy indicators) with interactive glowing connections,
+ * and realistic terminal feature typewriter animation.
  */
 
 (function() {
   "use strict";
 
   const FEATURE_LINES = [
-    { prefix: "[INIT]", text: "WipeX Enterprise Zero-Trust Data Sanitization Platform loaded.", color: "cyan" },
-    { prefix: "[SCAN]", text: "Real-time storage device discovery across NVMe, SATA SSDs, & HDDs.", color: "green" },
-    { prefix: "[FORENSIC]", text: "Deep undelete scanner reveals hidden trash, unallocated sectors, & .fseventsd.", color: "amber" },
-    { prefix: "[PURGE]", text: "Hardware controller purge: NVMe crypto erase & ATA enhanced voltage reset.", color: "cyan" },
-    { prefix: "[VISUALIZE]", text: "Real-time 256-cluster sector matrix visualizer with live MB/s throughput.", color: "green" },
-    { prefix: "[AUDIT]", text: "Mathematical Shannon Entropy audit proves 100% zero residual data.", color: "cyan" },
-    { prefix: "[TRIAGE]", text: "Circular economy health triage grades drives for resale, internal reuse, or shred.", color: "green" },
-    { prefix: "[LEDGER]", text: "Hardware-bound ECDSA digital certificates & historical audit trail.", color: "amber" },
-    { prefix: "[READY]", text: "All security modules operational. Click "Start Wiping" to begin.", color: "green" }
+    { prefix: "[INIT]", text: "WipeX Zero-Trust Hardware Sanitization Platform loaded.", color: "cyan" },
+    { prefix: "[SCAN]", text: "Active storage discovery across NVMe, SATA SSDs, & HDDs.", color: "green" },
+    { prefix: "[FORENSIC]", text: "Deep recovery scan checks unallocated sectors & trash traces.", color: "amber" },
+    { prefix: "[PURGE]", text: "Hardware controller purge: Cryptographic erase & voltage reset.", color: "cyan" },
+    { prefix: "[VISUALIZE]", text: "Live 256-cluster sector matrix visualizer with speed meter.", color: "green" },
+    { prefix: "[AUDIT]", text: "Shannon Entropy audit confirms 100% complete zero residue.", color: "cyan" },
+    { prefix: "[TRIAGE]", text: "Circular economy scoring grades drives for reuse or shred.", color: "green" },
+    { prefix: "[CERT]", text: "Tamper-proof digital certificates & audit ledger generated.", color: "amber" },
+    { prefix: "[READY]", text: "All security modules online. Click Start Wiping to begin.", color: "green" }
   ];
 
   class Cyber3DDashboard {
@@ -30,9 +31,8 @@
       this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
       
       this.typewriterLineIndex = 0;
-      this.typewriterCharIndex = 0;
       this.typewriterTimer = null;
-      this.isTyping = false;
+      this._hasInitialized = false;
     }
 
     init() {
@@ -52,7 +52,6 @@
         this.startAnimation();
       }
 
-      // Always restart the typewriter so it types fresh when navigating back
       this.startFeatureTypewriter();
     }
 
@@ -60,17 +59,17 @@
       if (!this.canvas) return;
       const parent = this.canvas.parentElement;
       this.width = this.canvas.width = parent ? parent.clientWidth : window.innerWidth;
-      this.height = this.canvas.height = parent ? parent.clientHeight : 540;
+      this.height = this.canvas.height = parent ? parent.clientHeight : 560;
     }
 
     createParticles() {
       this.particles = [];
-      const count = Math.min(55, Math.floor(this.width / 22));
+      const count = Math.min(65, Math.floor(this.width / 20));
       for (let i = 0; i < count; i++) {
         this.particles.push({
           x: Math.random() * this.width,
           y: Math.random() * this.height,
-          z: Math.random() * 800 + 200,
+          z: Math.random() * 800 + 150,
           vx: (Math.random() - 0.5) * 0.5,
           vy: (Math.random() - 0.5) * 0.5,
           vz: Math.random() * 1.8 + 0.8,
@@ -83,16 +82,22 @@
 
     createNodes() {
       this.nodes = [];
-      const nodeCount = 14;
+      const nodeCount = 16;
+      const labels = [
+        "ECDSA-P256", "Entropy: 0.0", "LBA: 0x4F2A", "Raw NVMe I/O",
+        "NIST 800-88", "IEEE 2883", "Zero-Residue", "SHA-256 Seal",
+        "Purge Controller", "Secure Erase", "Cert Vault", "SES-2 KeyReset"
+      ];
       for (let i = 0; i < nodeCount; i++) {
         this.nodes.push({
-          x: Math.random() * (this.width - 100) + 50,
-          y: Math.random() * (this.height - 100) + 50,
-          targetX: Math.random() * (this.width - 100) + 50,
-          targetY: Math.random() * (this.height - 100) + 50,
+          x: Math.random() * (this.width - 120) + 60,
+          y: Math.random() * (this.height - 120) + 60,
+          targetX: Math.random() * (this.width - 120) + 60,
+          targetY: Math.random() * (this.height - 120) + 60,
           radius: Math.random() * 3.5 + 2.5,
           pulse: Math.random() * Math.PI * 2,
-          color: i % 2 === 0 ? "#00f0ff" : "#00ff88"
+          color: i % 3 === 0 ? "#00f0ff" : (i % 3 === 1 ? "#00ff88" : "#38bdf8"),
+          label: labels[i % labels.length]
         });
       }
     }
@@ -144,23 +149,32 @@
         }
       }
 
-      // 3. Floating Network Nodes & Connections
+      // 3. Floating Network Nodes & Glowing Connections reacting to Mouse
       for (let i = 0; i < this.nodes.length; i++) {
         const n1 = this.nodes[i];
-        n1.pulse += 0.035;
+        n1.pulse += 0.04;
         n1.x += (n1.targetX - n1.x) * 0.008;
         n1.y += (n1.targetY - n1.y) * 0.008;
 
-        if (Math.hypot(n1.targetX - n1.x, n1.targetY - n1.y) < 6) {
-          n1.targetX = Math.random() * (w - 100) + 50;
-          n1.targetY = Math.random() * (h - 100) + 50;
+        // Repel or react slightly to mouse
+        const mouseDist = Math.hypot(n1.x - this.mouse.x, n1.y - this.mouse.y);
+        if (mouseDist < 140 && mouseDist > 0) {
+          const force = (140 - mouseDist) / 140 * 1.5;
+          n1.x += ((n1.x - this.mouse.x) / mouseDist) * force;
+          n1.y += ((n1.y - this.mouse.y) / mouseDist) * force;
         }
 
+        if (Math.hypot(n1.targetX - n1.x, n1.targetY - n1.y) < 6) {
+          n1.targetX = Math.random() * (w - 120) + 60;
+          n1.targetY = Math.random() * (h - 120) + 60;
+        }
+
+        // Draw connections to neighboring nodes
         for (let j = i + 1; j < this.nodes.length; j++) {
           const n2 = this.nodes[j];
           const dist = Math.hypot(n1.x - n2.x, n1.y - n2.y);
-          if (dist < 160) {
-            const alpha = (1 - dist / 160) * 0.2;
+          if (dist < 180) {
+            const alpha = (1 - dist / 180) * 0.28;
             ctx.beginPath();
             ctx.moveTo(n1.x, n1.y);
             ctx.lineTo(n2.x, n2.y);
@@ -170,23 +184,39 @@
           }
         }
 
+        // Draw mouse connection line if close
+        if (mouseDist < 160) {
+          const mouseAlpha = (1 - mouseDist / 160) * 0.45;
+          ctx.beginPath();
+          ctx.moveTo(n1.x, n1.y);
+          ctx.lineTo(this.mouse.x, this.mouse.y);
+          ctx.strokeStyle = "rgba(0, 255, 136, " + mouseAlpha + ")";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+
         // Draw node aura
-        const currentRadius = n1.radius + Math.sin(n1.pulse) * 1.2;
+        const currentRadius = n1.radius + Math.sin(n1.pulse) * 1.3;
         ctx.beginPath();
-        ctx.arc(n1.x, n1.y, currentRadius * 2, 0, Math.PI * 2);
+        ctx.arc(n1.x, n1.y, currentRadius * 2.2, 0, Math.PI * 2);
         ctx.fillStyle = n1.color;
-        ctx.globalAlpha = 0.12;
+        ctx.globalAlpha = 0.15;
         ctx.fill();
 
         ctx.beginPath();
         ctx.arc(n1.x, n1.y, currentRadius, 0, Math.PI * 2);
         ctx.fillStyle = n1.color;
-        ctx.globalAlpha = 0.85;
-        ctx.shadowBlur = 10;
+        ctx.globalAlpha = 0.9;
+        ctx.shadowBlur = 12;
         ctx.shadowColor = n1.color;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1.0;
+
+        // Node floating label
+        ctx.font = "10px JetBrains Mono, monospace";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.fillText(n1.label, n1.x + 8, n1.y + 3);
       }
     }
 
@@ -225,13 +255,11 @@
 
       container.innerHTML = "";
       this.typewriterLineIndex = 0;
-      this.typewriterCharIndex = 0;
 
       if (this.typewriterTimer) clearInterval(this.typewriterTimer);
 
       const typeNextLine = () => {
         if (this.typewriterLineIndex >= FEATURE_LINES.length) {
-          // Loop after pause
           setTimeout(() => {
             this.startFeatureTypewriter();
           }, 6000);
@@ -258,7 +286,6 @@
         lineEl.appendChild(cursorEl);
         container.appendChild(lineEl);
 
-        // Auto-scroll terminal container
         container.parentElement.scrollTop = container.parentElement.scrollHeight;
 
         let charIdx = 0;
@@ -271,7 +298,7 @@
             clearInterval(charTimer);
             cursorEl.remove();
             this.typewriterLineIndex++;
-            setTimeout(typeNextLine, 280);
+            setTimeout(typeNextLine, 260);
           }
         }, 18);
       };
@@ -297,13 +324,12 @@
 
   attachDashboard();
 
-  // ─── Global Background Canvas (persists across all views) ─────────────────
+  // ─── Global Background Canvas ─────────────────────────────────────────────
   class GlobalBgCanvas {
     constructor() {
       this.canvas = document.getElementById("global-bg-canvas");
       this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
       this.particles = [];
-      this.animId = null;
       this.width = 0;
       this.height = 0;
       this.mouse = { x: -9999, y: -9999 };
@@ -360,7 +386,6 @@
         p.y += p.vy;
         p.life -= p.decay;
 
-        // Subtle mouse repulsion
         const dx = p.x - this.mouse.x;
         const dy = p.y - this.mouse.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -386,20 +411,18 @@
         ctx.globalAlpha = 1;
       }
 
-      this.animId = requestAnimationFrame(() => this.animate());
+      requestAnimationFrame(() => this.animate());
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Boot the global background animation immediately
     const globalBg = new GlobalBgCanvas();
     globalBg.init();
 
-    // Boot dashboard typewriter after app is initialized (small delay ensures WipeXApp.init() is done)
     setTimeout(() => {
       if (window.app && typeof window.app.initDashboardAnimations === "function") {
         window.app.initDashboardAnimations();
       }
-    }, 200);
+    }, 150);
   });
 })();
