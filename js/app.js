@@ -687,7 +687,7 @@ class WipeXApp {
   }
 
   isPhaseAccessible(phaseNum) {
-    // ANTI-CORRUPTION LOCKOUT: Once wiping is in progress or wipe has completed (Steps 3, 4, 5):
+    // ANTI-CORRUPTION LOCKOUT: Once wiping is in progress or wipe has completed:
     // 1. Backwards navigation to Step 1 or Step 2 is strictly locked.
     // 2. Once reaching Step 4 or Step 5 (verification / cert), Step 3 (erase) is also locked against re-entry.
     if ((this.isWiping || this.wipeCompleted) && phaseNum < 3) {
@@ -703,16 +703,7 @@ class WipeXApp {
       };
     }
 
-    // Step 2 cannot be jumped into via top stepper when currently on Step 1 (must click Continue to Sanitization button)
-    if (this.currentPhase === 1 && phaseNum === 2) {
-      return { 
-        ok: false, 
-        reason: '👉 Click "Continue to Sanitization Method" below the drive explorer to proceed.' 
-      };
-    }
-
-    if (phaseNum === this.currentPhase) return { ok: true };
-    if (phaseNum < this.currentPhase) return { ok: true };
+    if (phaseNum <= this.currentPhase) return { ok: true };
     if (phaseNum > 5 || phaseNum < 1) return { ok: false, reason: 'Invalid step' };
     if (!this.phaseCompleted[1]) return { ok: false, reason: 'Step 1 required: Select a drive first' };
     if (phaseNum >= 3 && !this.phaseCompleted[2]) return { ok: false, reason: 'Step 2 required: Choose a sanitization method first' };
@@ -745,12 +736,14 @@ class WipeXApp {
       const accessibility = this.isPhaseAccessible(p.num);
       const isCurrent = p.num === this.currentPhase;
       const isCompleted = this.phaseCompleted[p.num] && !isCurrent;
-      const locked = !accessibility.ok;
+      // Disallow clicking Step 2 from top stepper when currently on Step 1
+      const isStep2FromStep1 = (this.currentPhase === 1 && p.num === 2);
+      const locked = !accessibility.ok || isStep2FromStep1;
       const isLockedPriorStep = locked && p.num <= 3 && (this.isWiping || this.wipeCompleted);
 
       return `
         <div class="step-item ${isCurrent ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${locked ? 'locked' : ''}"
-             onclick="app._stepperClick(${p.num})" title="${locked ? accessibility.reason : (isCurrent ? 'Current Step' : '')}">
+             onclick="app._stepperClick(${p.num})" title="${locked ? (isStep2FromStep1 ? '👉 Click \"Continue to Sanitization Method\" below to proceed' : accessibility.reason) : (isCurrent ? 'Current Step' : '')}">
           <div class="step-num-circle">${isLockedPriorStep ? '🔒' : (isCompleted ? '✓' : p.num)}</div>
           <span class="step-title">${p.title}</span>
         </div>
@@ -759,11 +752,20 @@ class WipeXApp {
   }
 
   _stepperClick(phaseNum) {
+    // When on Step 1, Step 2 is not clickable from top stepper (must use Continue button)
+    if (this.currentPhase === 1 && phaseNum === 2) {
+      return; // Silent no-op, non-clickable
+    }
     this.goToPhase(phaseNum);
   }
 
   goToPhase(phaseNum) {
     if (phaseNum < 1 || phaseNum > 5) return;
+
+    // Allow advancing to Step 2 if a device is selected
+    if (phaseNum === 2 && this.selectedDevice) {
+      this.phaseCompleted[1] = true;
+    }
 
     const access = this.isPhaseAccessible(phaseNum);
     if (!access.ok) {
