@@ -47,70 +47,70 @@ class WipeXApp {
 
     this.simpleMethods = [
       {
-        id: "quick-zero",
-        name: "Quick IT Asset Clear",
-        standard: "NIST Clear",
-        tier: "Standard ITAD Tier",
-        fullName: "Quick Single-Pass Zero Clear (NIST SP 800-88 Clear)",
-        oneLine: "Fast single-pass null clear for rapid turnaround and internal redeployment.",
-        speedBadge: "Fast (5-10 mins)",
-        securityBadge: "Standard Security",
-        recommendedFor: "General / Non-Sensitive Media"
+        id: "nist_800_88",
+        name: "NIST 800-88",
+        standard: "NIST SP 800-88",
+        tier: "Industry Standard",
+        fullName: "NIST 800-88 (Clear + Verify + Purge)",
+        oneLine: "Industry standard: Clear + Verify + Purge for complete sanitization.",
+        speedBadge: "Medium",
+        securityBadge: "High Security",
+        recommendedFor: "General Storage"
       },
       {
-        id: "purge-nvme-crypto",
-        name: "NVMe Cryptographic Purge",
-        standard: "NIST Purge",
-        tier: "NVMe Flash Tier",
-        fullName: "NIST SP 800-88 Cryptographic Erase (NVMe Purge)",
-        oneLine: "Instant hardware encryption key destruction across all flash channels and reserve blocks.",
-        speedBadge: "Instant (1-2 mins)",
+        id: "crypto_erase",
+        name: "Cryptographic Erase",
+        standard: "NVMe / SSD Purge",
+        tier: "Flash SSD Tier",
+        fullName: "Cryptographic Erase (Instant Key Destruction)",
+        oneLine: "Preferred for SSDs: Instant hardware encryption key destruction.",
+        speedBadge: "Fast",
         securityBadge: "Highest Security",
-        recommendedFor: "NVMe SSD"
+        recommendedFor: "NVMe / SATA SSD"
       },
       {
-        id: "purge-ata-secure",
-        name: "SATA SSD Enhanced Purge",
-        standard: "NIST Purge",
-        tier: "SATA Flash Tier",
-        fullName: "NIST SP 800-88 Enhanced Security Erase (Purge)",
-        oneLine: "Native controller firmware reset clearing 100% of flash cells and hidden HPA areas.",
-        speedBadge: "Fast (3-5 mins)",
+        id: "ata_sanitize",
+        name: "ATA Sanitize",
+        standard: "ATA Secure Erase",
+        tier: "Hardware Level",
+        fullName: "ATA Sanitize (Hardware-Level Secure Erase)",
+        oneLine: "Hardware-level secure erase resetting firmware and flash blocks.",
+        speedBadge: "Fast",
         securityBadge: "High Security",
         recommendedFor: "SATA SSD"
       },
       {
-        id: "dod-3pass",
-        name: "Magnetic HDD ITAD Standard",
-        standard: "DoD 5220.22-M",
+        id: "dod_5220_22_m",
+        name: "DoD 5220.22-M",
+        standard: "Military Standard",
         tier: "Magnetic Platter Tier",
-        fullName: "DoD 5220.22-M 3-Pass Standard Overwrite",
-        oneLine: "3-Pass sequence using 0x00, 0xFF, and pseudo-random byte patterns for hard drives.",
-        speedBadge: "Standard (20-40 mins)",
+        fullName: "DoD 5220.22-M (3-Pass Overwrite)",
+        oneLine: "Military standard: 3-pass overwrite (zeros, ones, random data).",
+        speedBadge: "Medium",
         securityBadge: "High Security",
         recommendedFor: "Magnetic HDD"
       },
       {
-        id: "gutmann-35",
-        name: "Deep Forensic Platter Purge",
-        standard: "Gutmann 35-Pass",
-        tier: "High-Assurance / Defense Tier",
-        fullName: "Peter Gutmann 35-Pass Magnetic Recording Pattern Suite",
-        oneLine: "Exhaustive 35-pass magnetic flux transition suite targeting classified and financial storage.",
-        speedBadge: "Extended Duration",
-        securityBadge: "Maximum Security",
-        recommendedFor: "High-Security Platters"
+        id: "single_pass",
+        name: "Single Pass",
+        standard: "NIST Clear",
+        tier: "Rapid Turnaround",
+        fullName: "Single Pass (Quick Zero Clear)",
+        oneLine: "Quick wipe with zeros for fast non-sensitive drive reuse.",
+        speedBadge: "Fast",
+        securityBadge: "Standard Security",
+        recommendedFor: "USB / Non-Sensitive"
       },
       {
-        id: "destroy-physical",
-        name: "Physical Destruction Mandate",
-        standard: "NIST Destroy",
-        tier: "Mandatory Shred Tier",
-        fullName: "Mandatory Mechanical Disintegration (<2mm Shredding)",
-        oneLine: "Required when drive has physical defects, bad sectors, or failing hardware.",
-        speedBadge: "Facility Shredder",
-        securityBadge: "Physical Shred",
-        recommendedFor: "FAILING"
+        id: "gutmann",
+        name: "Gutmann",
+        standard: "35-Pass Suite",
+        tier: "Maximum Security",
+        fullName: "Gutmann 35-Pass Forensic Overwrite",
+        oneLine: "Maximum security: 35-pass magnetic flux overwrite.",
+        speedBadge: "Very Long",
+        securityBadge: "Maximum Security",
+        recommendedFor: "High-Security Platters"
       }
     ];
 
@@ -872,12 +872,14 @@ class WipeXApp {
           let isRecommended = false;
 
           if (dev) {
-            if (dev.expectedOutcome === 'RED' && m.id === 'destroy-physical') isRecommended = true;
-            else if (dev.expectedOutcome !== 'RED') {
-              if (dev.type && dev.type.includes('NVMe') && m.id === 'purge-nvme-crypto') isRecommended = true;
-              else if (dev.type && (dev.type.includes('SATA SSD') || dev.hpaDetected) && m.id === 'purge-ata-secure') isRecommended = true;
-              else if (dev.type && dev.type.includes('Magnetic') && m.id === 'dod-3pass') isRecommended = true;
-              else if (dev.type && dev.type.includes('USB') && m.id === 'quick-zero') isRecommended = true;
+            if (dev.expectedOutcome === 'RED') {
+              if (m.id === 'nist_800_88') isRecommended = true;
+            } else {
+              if (dev.type && dev.type.includes('NVMe') && m.id === 'crypto_erase') isRecommended = true;
+              else if (dev.type && (dev.type.includes('SATA SSD') || dev.hpaDetected) && m.id === 'ata_sanitize') isRecommended = true;
+              else if (dev.type && dev.type.includes('Magnetic') && m.id === 'dod_5220_22_m') isRecommended = true;
+              else if (dev.type && dev.type.includes('USB') && m.id === 'single_pass') isRecommended = true;
+              else if (!dev.type && m.id === 'nist_800_88') isRecommended = true;
             }
           }
 
