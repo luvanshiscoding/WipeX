@@ -137,23 +137,28 @@ class WipeXApp {
   }
 
   async fetchBackend(endpoint, options = {}) {
-    const origins = [
-      '',
+    // First probe of diskutil can take 10-15s — use a long timeout for device endpoints
+    const isDeviceEndpoint = endpoint.includes('/api/devices') || endpoint.includes('/api/drives');
+    const timeoutMs = isDeviceEndpoint ? 20000 : 8000;
+
+    const bases = [
       'http://127.0.0.1:8000',
       'http://localhost:8000',
-      this.apiBaseUrl
     ];
-    const uniqueOrigins = Array.from(new Set(origins.filter(Boolean)));
+    if (this.apiBaseUrl && !bases.includes(this.apiBaseUrl)) {
+      bases.push(this.apiBaseUrl);
+    }
+
     const endpointsToTry = [endpoint];
     if (endpoint === '/api/devices') endpointsToTry.push('/api/drives');
     else if (endpoint === '/api/drives') endpointsToTry.push('/api/devices');
 
     for (const ep of endpointsToTry) {
-      for (const base of uniqueOrigins) {
+      for (const base of bases) {
         try {
-          const url = base.endsWith('/') ? `${base.slice(0, -1)}${ep}` : `${base}${ep}`;
+          const url = base.replace(/\/$/, '') + ep;
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
           const res = await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
           clearTimeout(timeoutId);
           if (res && res.ok) return res;
@@ -325,12 +330,16 @@ class WipeXApp {
       if (span) span.textContent = 'Scanning…';
     }
 
+    // Show scanning state immediately — first diskutil probe can take 10-15s
     if (listEl && (!this.devices || this.devices.length === 0)) {
       listEl.innerHTML = `
         <div style="text-align:center; padding:40px; color:var(--text-muted); grid-column: 1 / -1;">
-          <div style="font-size:28px; margin-bottom:12px;">🔍</div>
-          <div style="font-size:14px; font-weight:600;">Scanning connected storage devices…</div>
-          <div style="font-size:12px; margin-top:6px; color:var(--text-muted);">Querying device health and storage topology</div>
+          <div style="font-size:28px; margin-bottom:12px; animation: spin 2s linear infinite; display:inline-block;">🔍</div>
+          <div style="font-size:14px; font-weight:600; color:var(--cyan-neon);">Scanning connected storage devices…</div>
+          <div style="font-size:12px; margin-top:6px; color:var(--text-muted);">Querying hardware health via diskutil — may take up to 15 seconds</div>
+          <div style="margin-top:14px; height:3px; width:180px; margin-left:auto; margin-right:auto; background:rgba(0,240,255,0.12); border-radius:2px; overflow:hidden;">
+            <div style="height:100%; width:40%; background:var(--cyan-neon); border-radius:2px; animation:scan-slide 1.4s ease-in-out infinite;"></div>
+          </div>
         </div>
       `;
     }
@@ -338,10 +347,10 @@ class WipeXApp {
     let devices = [];
 
     if (this.demoMode) {
-      // In DEMO MODE: Deep clone interactive scenario presets to keep demo files isolated and intact
+      // DEMO MODE: use presets
       devices = (window.MOCK_DEVICES || []).map(d => JSON.parse(JSON.stringify(d)));
     } else {
-      // In REAL HARDWARE MODE: Fetch and show real physical connected devices via backend probe
+      // REAL HARDWARE MODE — fetch with 20s timeout (diskutil first run is slow)
       try {
         const res = await this.fetchBackend('/api/devices');
         if (res && res.ok) {
@@ -354,6 +363,21 @@ class WipeXApp {
         devices = [];
       }
 
+      // If still empty, retry once after 2s (backend cache may still be warming)
+      if (devices.length === 0) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const res2 = await this.fetchBackend('/api/devices');
+          if (res2 && res2.ok) {
+            const fetched2 = await res2.json();
+            if (Array.isArray(fetched2) && fetched2.length > 0) {
+              devices = fetched2;
+            }
+          }
+        } catch (e) { /* silent */ }
+      }
+
+      // Fallback to previously loaded list if backend still empty
       if (devices.length === 0 && this.devices && this.devices.length > 0) {
         devices = this.devices;
       }

@@ -297,7 +297,7 @@
         let backendProgress = 0;
         let pollCount = 0;
 
-        // Fast animation ticker (smooth 40ms pulse matching demo mode)
+        // Fast animation ticker (smooth 35ms pulse)
         this.wipeInterval = setInterval(() => {
           // Advance smooth cluster visualizer up to target or simulated pace
           const maxAllowedCluster = Math.min(totalClusters, Math.max(currentCluster + 1, Math.round((Math.max(backendProgress, 5) / 100) * totalClusters)));
@@ -308,14 +308,14 @@
             }
             self.sectorStates[currentCluster] = 1; // active cyan pulse
             currentCluster++;
-            self.wipeProgress = Math.min(99, Math.round((currentCluster / totalClusters) * 100));
+            self.wipeProgress = Math.min(100, Math.round((currentCluster / totalClusters) * 100));
             self.updateWipeUI();
             self.drawCanvas();
           }
 
           pollCount++;
-          // Every 12 ticks (~480ms), poll backend status
-          if (pollCount % 12 === 0) {
+          // Every 8 ticks (~280ms), poll backend status
+          if (pollCount % 8 === 0) {
             (async () => {
               try {
                 const fetchFn = (typeof self.fetchBackend === 'function') ? self.fetchBackend.bind(self) : fetch;
@@ -324,8 +324,9 @@
                   const statusData = await statusRes.json();
                   backendProgress = statusData.progress || backendProgress;
 
-                  if (statusData.status === 'COMPLETED' || backendProgress >= 100) {
+                  if (statusData.status === 'COMPLETED' || backendProgress >= 100 || currentCluster >= totalClusters) {
                     clearInterval(self.wipeInterval);
+                    self.wipeInterval = null;
                     self.wipeProgress = 100;
                     for (let i = 0; i < totalClusters; i++) {
                       self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
@@ -354,9 +355,10 @@
                       if (self.currentPhase === 3 && self.wipeCompleted) {
                         self.goToPhase(4);
                       }
-                    }, 1600);
+                    }, 800);
                   } else if (statusData.status === 'FAILED') {
                     clearInterval(self.wipeInterval);
+                    self.wipeInterval = null;
                     self.isWiping = false;
                     alert(`Sanitization error: ${statusData.command || 'Device write failure'}`);
                   }
@@ -366,9 +368,9 @@
               }
             })();
           }
-        }, 40);
+        }, 35);
       } else {
-        // Fallback simulation timer (Demo Mode - smooth ~12-14 second realistic hardware simulation)
+        // Fallback simulation timer (Demo Mode - fast, smooth, zero lag, ~8-10s duration)
         this.wipeInterval = setInterval(() => {
           if (currentCluster < totalClusters) {
             if (currentCluster > 0) {
@@ -376,11 +378,14 @@
             }
             self.sectorStates[currentCluster] = 1;
             currentCluster++;
-            self.wipeProgress = Math.min(99, Math.round((currentCluster / totalClusters) * 100));
+            self.wipeProgress = Math.round((currentCluster / totalClusters) * 100);
             self.updateWipeUI();
             self.drawCanvas();
-          } else {
-            self.sectorStates[totalClusters - 1] = isDamaged ? 3 : 2;
+          }
+
+          if (currentCluster >= totalClusters) {
+            clearInterval(self.wipeInterval);
+            self.wipeInterval = null;
             for (let i = 0; i < totalClusters; i++) {
               self.sectorStates[i] = (isDamaged && i % 20 === 0) ? 3 : 2;
             }
@@ -388,7 +393,6 @@
             self.isWiping = false;
             self.wipeCompleted = true;
             self.phaseCompleted[3] = true;
-            clearInterval(self.wipeInterval);
             self._applyPostWipeFileCleanup();
             self.updateWipeUI();
             self.drawCanvas();
@@ -400,7 +404,7 @@
               deviceId: self.selectedDevice ? self.selectedDevice.id : "DEV-DEMO",
               method: self.selectedMethodId || "purge-nvme-crypto",
               status: isDamaged ? "FAILED" : "COMPLETED",
-              startedAt: new Date(Date.now() - 14000).toISOString(),
+              startedAt: new Date(Date.now() - 10000).toISOString(),
               completedAt: new Date().toISOString(),
               command: isDamaged ? "Hardware fault detected during controller write test" : "Direct Controller Purge + Multi-Pass Verification"
             });
@@ -422,9 +426,9 @@
               if (self.currentPhase === 3 && self.wipeCompleted) {
                 self.goToPhase(4);
               }
-            }, 1600);
+            }, 800);
           }
-        }, 55);
+        }, 35);
       }
     };
 

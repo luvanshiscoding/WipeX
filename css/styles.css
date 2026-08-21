@@ -1542,55 +1542,69 @@ body:not(.demo-mode-active) .demo-only-feature {
    STEP 5: INDEPENDENT VERIFICATION
    ========================================================================== */
 .verification-result-card {
-  background: var(--emerald-bg);
-  border: 1.5px solid var(--emerald-border);
-  border-radius: var(--radius-xl);
-  padding: 36px 32px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
   text-align: center;
-  box-shadow: 0 0 30px rgba(0, 255, 136, 0.12);
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.verification-result-card.verify-passed {
+  border-color: var(--emerald-border);
+  background-color: var(--emerald-bg);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.08);
 }
 
 .verification-result-card.verify-failed {
   border-color: var(--red-border);
   background-color: var(--red-bg);
-  box-shadow: 0 0 30px rgba(255, 51, 102, 0.12);
+  box-shadow: 0 0 20px rgba(255, 51, 102, 0.08);
 }
 
 .verify-icon-box {
-  width: 68px;
-  height: 68px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  margin: 0 auto 16px;
+  margin: 0 auto 10px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.verify-icon-box svg {
+  width: 24px;
+  height: 24px;
+}
+
 .verify-icon-box.verify-success {
   background: var(--emerald-neon);
   color: #07090e;
-  box-shadow: 0 0 20px var(--emerald-glow);
+  box-shadow: 0 0 14px var(--emerald-glow);
 }
 
 .verification-result-card.verify-failed .verify-icon-box {
   background: var(--red-neon);
   color: #07090e;
-  box-shadow: 0 0 20px var(--red-glow);
+  box-shadow: 0 0 14px var(--red-glow);
 }
 
 .verify-title {
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 800;
   color: #ffffff;
   letter-spacing: -0.02em;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .verify-desc {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-secondary);
   max-width: 580px;
-  margin: 0 auto 24px;
+  margin: 0 auto 12px;
+  line-height: 1.35;
 }
 
 .simple-stats-pills {
@@ -1598,46 +1612,47 @@ body:not(.demo-mode-active) .demo-only-feature {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .s-pill {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid var(--border-medium);
-  padding: 8px 16px;
+  padding: 5px 12px;
   border-radius: var(--radius-pill);
-  font-size: 13px;
+  font-size: 11.5px;
   color: var(--text-primary);
   box-shadow: var(--shadow-xs);
 }
 
 /* ==========================================================================
-   STEP 6: SAFETY SCORE (TRAFFIC LIGHT)
+   STEP 6: SAFETY SCORE (TRAFFIC LIGHT COMPACT)
    ========================================================================== */
 .trust-score-card-simple {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  padding: 36px 32px;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
   text-align: center;
   box-shadow: var(--shadow-sm);
+  margin-top: 10px !important;
 }
 
 .score-traffic-light {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   background: #05070a;
   border: 1px solid var(--border-medium);
-  padding: 10px 20px;
-  border-radius: 30px;
-  margin-bottom: 22px;
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
+  padding: 6px 14px;
+  border-radius: 20px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
 }
 
 .light-circle {
-  width: 22px;
-  height: 22px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   opacity: 0.2;
   transition: all 0.2s ease;
