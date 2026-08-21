@@ -123,9 +123,12 @@ class WipeXApp {
     this.renderMethodOptions();
     this.initCanvas();
     await this.loadDevices();
-    if (this.activeView === 'dashboard' && typeof this.initDashboardAnimations === 'function') {
-      this.initDashboardAnimations();
-    }
+    // Defer dashboard init to ensure app_cyber_dashboard.js has attached the method
+    setTimeout(() => {
+      if (typeof this.initDashboardAnimations === 'function') {
+        this.initDashboardAnimations();
+      }
+    }, 50);
 
     // Check if user opened page via a scanned QR code with verification parameters
     const params = new URLSearchParams(window.location.search);
@@ -400,6 +403,9 @@ class WipeXApp {
     if (viewName === 'dashboard') {
       document.getElementById('nav-dashboard-btn')?.classList.add('active');
       document.getElementById('dashboard-view')?.classList.add('active');
+      // Clear old typed lines so animation restarts fresh
+      const ftc = document.getElementById('feature-typewriter-container');
+      if (ftc) ftc.innerHTML = '';
       if (typeof this.initDashboardAnimations === 'function') {
         this.initDashboardAnimations();
       }

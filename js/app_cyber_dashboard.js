@@ -37,17 +37,22 @@
 
     init() {
       if (!this.canvas) return;
-      this.resize();
-      window.addEventListener("resize", () => this.resize());
-      window.addEventListener("mousemove", (e) => {
-        const rect = this.canvas.getBoundingClientRect();
-        this.mouse.x = e.clientX - rect.left;
-        this.mouse.y = e.clientY - rect.top;
-      });
 
-      this.createParticles();
-      this.createNodes();
-      this.startAnimation();
+      if (!this._hasInitialized) {
+        this._hasInitialized = true;
+        this.resize();
+        window.addEventListener("resize", () => this.resize());
+        window.addEventListener("mousemove", (e) => {
+          const rect = this.canvas.getBoundingClientRect();
+          this.mouse.x = e.clientX - rect.left;
+          this.mouse.y = e.clientY - rect.top;
+        });
+        this.createParticles();
+        this.createNodes();
+        this.startAnimation();
+      }
+
+      // Always restart the typewriter so it types fresh when navigating back
       this.startFeatureTypewriter();
     }
 
