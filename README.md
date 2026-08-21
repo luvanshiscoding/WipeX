@@ -27,6 +27,7 @@ WipeX is architected specifically for corporate IT asset governance, enterprise 
                                │       WIPEX ENTERPRISE WORKSTATION      │
                                │  • Multi-Tier Physical Drive Sanitize   │
                                │  • Forensic Footprint & Undelete Audit  │
+                               │  • ZeroTrace-Grid Method Selector       │
                                │  • Mathematical Shannon Entropy Engine  │
                                │  • Circular Economy Health Assessment   │
                                └────────────────────┬────────────────────┘
@@ -45,29 +46,34 @@ WipeX is architected specifically for corporate IT asset governance, enterprise 
 
 ## ⚡ Key Architecture & Core Workflow
 
-WipeX utilizes a structured **5-Phase Hardware Sanitization Stepper**:
+WipeX utilizes a structured **5-Phase Hardware Sanitization Stepper** with an interactive 3D cybersecurity dashboard:
+
+### 0. 3D Cybersecurity Interactive Dashboard (Homepage v1.0)
+- **3D Constellation Canvas**: Particle matrix horizon with 16 floating cryptographic nodes (`ECDSA-P256`, `Entropy: 0.0`, `LBA: 0x4F2A`, `Raw NVMe I/O`, `NIST 800-88`, `SES-2 KeyReset`) reacting interactively to mouse position with laser connection lines.
+- **Terminal Diagnostics Typewriter**: Live diagnostics typewriter dynamically typing platform security capabilities line by line.
+- **Compact Viewport Integration**: Carefully formatted to fit cleanly without unnecessary vertical scrolling.
 
 ### 1. Phase 1: Select Storage Drive & Real Forensic Footprint Inspection
 - **Hardware Discovery**: Direct physical disk topology probing via macOS `diskutil`, Linux `lsblk`, and Windows storage APIs.
-- **Forensic Footprint & Undelete Analysis**: Scans active filesystem data, OS Trash bins, transaction journals (`.fseventsd`), and unallocated sectors. Shows organizations exactly which active files and permanently deleted unlinked files remain recoverable on unsanitized drives.
+- **Forensic Footprint & Undelete Analysis**: Scans active filesystem data, OS Trash bins, transaction journals (`.fseventsd`), and unallocated sectors. Surfaces recoverable traces on unsanitized drives.
 - **SMART Health Telemetry**: Live extraction of power-on hours, raw operating temperature, reallocated sector counts, and SSD wear percentages.
 
-### 2. Phase 2: Curated ITAD Sanitization Tier Selection
-- **Intelligent Media-Aware Matching**: Automatically evaluates disk controller architecture and recommends the exact regulatory erasure standard:
-  - **Standard ITAD Tier**: NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00 Overwrite).
-  - **NVMe Flash Tier**: NIST SP 800-88 Cryptographic Purge (Instant hardware encryption key destruction across all NAND channels).
-  - **SATA Flash Tier**: NIST SP 800-88 Enhanced Security Erase (Firmware-level block voltage purge with HPA/DCO unfreezing).
-  - **Magnetic Platter Tier**: DoD 5220.22-M 3-Pass Military Overwrite (`0x00`, `0xFF`, Cryptographic PRNG).
-  - **High-Assurance / Defense Tier**: Peter Gutmann 35-Pass Forensic Magnetic Platter Purge.
-  - **Mandatory Shred Tier**: NIST SP 800-88 Mechanical Disintegration (<2mm shred mandate for damaged media).
+### 2. Phase 2: Curated ITAD Sanitization Tier Selection (ZeroTrace-Grid Layout)
+- **Interactive Multi-Card Grid**: Clean 2-column responsive layout with radio selector, recommended badges, estimated times, and regulatory security standards:
+  - **Quick IT Asset Clear**: NIST SP 800-88 Rev. 1 Clear (Single-Pass 0x00 Overwrite).
+  - **NVMe Flash Purge**: NIST SP 800-88 Cryptographic Purge (Hardware-level encryption key destruction).
+  - **SATA Flash Purge**: NIST SP 800-88 Enhanced Security Erase (Firmware-level block voltage purge + HPA/DCO unfreeze).
+  - **Magnetic Platter DoD**: DoD 5220.22-M 3-Pass Military Overwrite (`0x00`, `0xFF`, Cryptographic PRNG).
+  - **High-Assurance Gutmann**: Peter Gutmann 35-Pass Forensic Magnetic Platter Purge.
+  - **Mandatory Shred Order**: NIST SP 800-88 Mechanical Disintegration (<2mm shred mandate for damaged media).
 
 ### 3. Phase 3: Hardware Sanitization & 256-Cluster Matrix Visualizer
-- **Raw Block Streaming**: Unbuffered binary block I/O directly streaming to block devices (`/dev/rdiskX`, `/dev/sdX`, `\\.\PhysicalDriveX`).
-- **Real-Time Matrix Visualizer**: 256-cell interactive canvas displaying active write sweeps, block completions, live throughput (MB/s), and real-time remaining ETA.
+- **Raw Block Streaming**: Direct binary block streaming to raw block controllers.
+- **Real-Time Matrix Visualizer**: 256-cell interactive canvas displaying active write sweeps, block completions, live throughput (MB/s), and dynamic remaining ETA.
 - **Anti-Corruption Safety Lockout (`🔒`)**: Irrevocably seals Phase 1 and 2 parameters once wiping begins, preventing session hijacking or double-wipe state corruption.
 
 ### 4. Phase 4: Zero-Trust Verification & Circular Economy Safety Assessment
-- **Mathematical Shannon Entropy Audit**: Independent post-wipe verification sampling 10,000 LBAs across physical geometry to prove absolute data destruction:
+- **Mathematical Shannon Entropy Audit**: Independent post-wipe verification sampling 10,000 LBAs across physical geometry:
   $$H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i) = 0.000000 \text{ bits/byte}$$
 - **Circular Economy Triage Health Score**:
   - 🟢 **GREEN (Safe for Resale / Secondary Market)**: $H(X) = 0.000000$, 0 bad sectors, health $\ge 90\%$, lifetime $< 20,000\text{ hrs}$.
@@ -84,10 +90,9 @@ WipeX utilizes a structured **5-Phase Hardware Sanitization Stepper**:
 ## 📜 Audit Trail & Historical Ledger Tab
 
 WipeX includes a centralized **History & Audit Hub**:
-- **Wipe Sessions Registry**: Detailed audit trail of every past sanitization run (Device ID, model, method, operator timestamp, sector count, duration, final status).
+- **Live Dynamic Session Logging**: Automatically archives newly executed wipe sessions and pre-seeded enterprise wipe sessions with full audit metadata.
 - **Certificate Vault**: Searchable historical certificate repository with instant PDF / JSON redownloads.
 - **Dual Database Persistence**: Seamless synchronization to PostgreSQL (port 5432) for enterprise data center logging with automatic local SQLite fallback (`wipex.db`).
-- **One-Click Ledger Maintenance**: Granular audit trail clearing and database maintenance controls.
 
 ---
 
@@ -101,14 +106,14 @@ WipeX includes a centralized **History & Audit Hub**:
 | **Hardware Controller Purge** | Generic user-space file overwriting / basic `dd` commands | **True Hardware Controller Purge**: Native NVMe crypto sanitize (`nvme sanitize -a crypto`), ATA Enhanced Security Erase, and HPA/DCO boundary unfreezing. |
 | **Circular Economy Triage** | No diagnostic health analysis | **Automated ITAD Triage**: Multi-metric SMART telemetry & wear analysis outputting Green (Resale), Yellow (Internal Reuse), or Red (Shred). |
 | **Tamper-Proof Audit Certificates** | Unsigned simulated PDF certificates | **NIST P-256 ECDSA Digital Signatures**: Cryptographically binds hardware serial, nonce, and erasure digest with instant verification API. |
-| **Historical Compliance Ledger** | Basic local session storage | **Enterprise Dual-Ledger Architecture**: Persistent PostgreSQL & SQLite historical records with downloadable compliance certs. |
+| **Historical Compliance Ledger** | Basic local session storage | **Enterprise Dual-Ledger Architecture**: Persistent PostgreSQL & SQLite historical records with dynamic session appending. |
 
 ---
 
-## 🚀 Deployment & Installation
+## 🚀 Deployment & Quick Start
 
 ### Prerequisites
-- Python 3.9+ with virtual environment support
+- Python 3.9+ with virtual environment
 - Node.js 18+ & npm
 - macOS 12+, Ubuntu Linux 20.04+, or Windows 10/11 Enterprise
 

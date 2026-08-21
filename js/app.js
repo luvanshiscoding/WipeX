@@ -865,39 +865,42 @@ class WipeXApp {
 
     const dev = this.selectedDevice;
 
-    listEl.innerHTML = this.simpleMethods.map(m => {
-      const isSelected = (m.id === this.selectedMethodId);
-      let isRecommended = false;
+    listEl.innerHTML = `
+      <div class="method-grid-zerotrace">
+        ${this.simpleMethods.map(m => {
+          const isSelected = (m.id === this.selectedMethodId);
+          let isRecommended = false;
 
-      if (dev) {
-        if (dev.expectedOutcome === 'RED' && m.id === 'destroy-physical') isRecommended = true;
-        else if (dev.expectedOutcome !== 'RED') {
-          if (dev.type && dev.type.includes('NVMe') && m.id === 'purge-nvme-crypto') isRecommended = true;
-          else if (dev.type && (dev.type.includes('SATA SSD') || dev.hpaDetected) && m.id === 'purge-ata-secure') isRecommended = true;
-          else if (dev.type && dev.type.includes('Magnetic') && m.id === 'dod-3pass') isRecommended = true;
-          else if (dev.type && dev.type.includes('USB') && m.id === 'quick-zero') isRecommended = true;
-        }
-      }
+          if (dev) {
+            if (dev.expectedOutcome === 'RED' && m.id === 'destroy-physical') isRecommended = true;
+            else if (dev.expectedOutcome !== 'RED') {
+              if (dev.type && dev.type.includes('NVMe') && m.id === 'purge-nvme-crypto') isRecommended = true;
+              else if (dev.type && (dev.type.includes('SATA SSD') || dev.hpaDetected) && m.id === 'purge-ata-secure') isRecommended = true;
+              else if (dev.type && dev.type.includes('Magnetic') && m.id === 'dod-3pass') isRecommended = true;
+              else if (dev.type && dev.type.includes('USB') && m.id === 'quick-zero') isRecommended = true;
+            }
+          }
 
-      return `
-        <div class="method-option-card ${isSelected ? 'selected' : ''}" onclick="app.selectSimpleMethod('${m.id}')">
-          <div class="method-left" style="flex:1;">
-            <div class="method-radio-circle"></div>
-            <div>
-              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
-                <span class="method-name" style="margin-bottom:0;">${m.name}</span>
-                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(0,240,255,0.08); color:var(--cyan-neon); font-weight:700;">${m.speedBadge}</span>
-                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--text-secondary); font-weight:600;">${m.securityBadge}</span>
-                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.04); color:var(--text-muted);">${m.tier}</span>
+          return `
+            <div class="zt-method-card ${isSelected ? 'selected' : ''} ${isRecommended ? 'recommended' : ''}" onclick="app.selectSimpleMethod('${m.id}')">
+              <div class="zt-method-header">
+                <input type="radio" name="sanitization_method" value="${m.id}" ${isSelected ? 'checked' : ''} style="cursor:pointer; accent-color:var(--cyan-neon); width:16px; height:16px;" onclick="event.stopPropagation(); app.selectSimpleMethod('${m.id}')" />
+                <h4 class="zt-method-title">${m.name}</h4>
+                ${isRecommended ? '<span class="zt-badge-rec">Recommended</span>' : ''}
               </div>
-              <div class="method-one-line">${m.oneLine}</div>
-              <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Standard: <strong>${m.standard}</strong></div>
+              <p class="zt-method-desc">${m.oneLine}</p>
+              <div class="zt-method-footer">
+                <span class="zt-time-est">⏱️ ${m.speedBadge}</span>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <span class="zt-badge-tier">${m.standard}</span>
+                  <span class="zt-badge-sec">${m.securityBadge}</span>
+                </div>
+              </div>
             </div>
-          </div>
-          ${isRecommended ? '<span class="method-badge-rec">Recommended</span>' : ''}
-        </div>
-      `;
-    }).join('');
+          `;
+        }).join('')}
+      </div>
+    `;
 
     this.phaseCompleted[2] = !!this.selectedMethodId;
   }

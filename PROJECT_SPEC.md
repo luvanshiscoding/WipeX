@@ -15,13 +15,20 @@ To prevent malicious misuse—such as criminal cyber-theft evidence destruction,
 
 ---
 
-## 🏛️ Master System Workflow Architecture (5-Phase Stepper)
+## 🏛️ Master System Workflow Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                      WIPEX ENTERPRISE WORKFLOW ENGINE                             │
 └──────────────────────────────────────────────────────────────────────────────────┘
 
+ [ View 0: 3D Cybersecurity Interactive Overview (v1.0) ]
+   │
+   ├─► Real-Time Particle Matrix & Perspective Horizon Canvas
+   ├─► 16 Floating Cryptographic Nodes with Dynamic Mouse-Reactive Laser Connections
+   └─► Line-by-Line Terminal Feature Typewriter Diagnostics
+   │
+   ▼
  [ Phase 1: Drive Discovery & Forensic Audit ]
    │
    ├─► Real Physical Topology (macOS diskutil / Linux lsblk / Windows IOCTL)
@@ -29,7 +36,7 @@ To prevent malicious misuse—such as criminal cyber-theft evidence destruction,
    └─► Forensic Footprint Engine (Active Files vs. Recoverable Deleted/Trash & FSEvents)
    │
    ▼
- [ Phase 2: Curated ITAD Sanitization Tier Selection ]
+ [ Phase 2: Curated ITAD Sanitization Tier Selection (ZeroTrace-Grid Layout) ]
    │
    ├─► Standard ITAD Tier: NIST SP 800-88 Clear (0x00 Single-Pass)
    ├─► NVMe Flash Tier: NIST SP 800-88 Crypto Purge (Hardware Controller Key Destruction)
@@ -41,8 +48,8 @@ To prevent malicious misuse—such as criminal cyber-theft evidence destruction,
    ▼
  [ Phase 3: Hardware Sanitization & 256-Cluster Matrix ]
    │
-   ├─► Raw Block Kernel Streaming (/dev/rdiskX, /dev/sdX, \\.\PhysicalDriveX)
-   ├─► 256-Cell Dynamic Cluster Matrix Visualizer with Live Throughput (MB/s) & ETA
+   ├─► Raw Block Kernel Streaming (/dev/rdiskX, /dev/sdX, \\.\\PhysicalDriveX)
+   ├─► 256-Cell Dynamic Cluster Matrix Visualizer with Live Throughput (MB/s) & Realistic ETA
    └─► Anti-Corruption Lockout (🔒 Locks backward phases to prevent session tampering)
    │
    ▼
@@ -59,53 +66,22 @@ To prevent malicious misuse—such as criminal cyber-theft evidence destruction,
    ▼
  [ Phase 5: Hardware-Bound NIST P-256 ECDSA Certificate ]
    │
-   ├─► Hardware Binding: SHA-256(Serial || Model || Nonce || Method || Timestamp || Outcome)
-   ├─► Digital Signature: NIST P-256 (secp256r1) ECDSA Private Key Signing
-   └─► Delivery: Clean Print/PDF Export + Automatic Synchronization to Dual Audit Ledger
+   ├─► Canonical SHA-256 Digest: Serial + Model + Nonce + Standard + Timestamp + Triage
+   ├─► Asymmetric Signature: Signed via NIST P-256 Private Key
+   └─► Dynamic Session & Certificate Ledger Logging
 ```
 
 ---
 
-## 🔬 WipeX vs. ZeroTrace: Technical Comparison
+## 🔬 WipeX vs. ZeroTrace: Deep Technical Comparison
 
 | Technical Dimension | ZeroTrace | WipeX Enterprise Platform |
 |---|---|---|
-| **Access & Distribution** | Publicly accessible code/app with zero access controls | **Restricted Enterprise B2B**: Strict business verification & compliance screening to prevent malicious evidence destruction. |
-| **Data Verification** | Naive zero-byte sampling (`0x00` check on a few sectors) | **Mathematical Shannon Entropy Audit**: Multiprocess verification of 10,000 LBAs proving $H(X) = 0.000000$, catching encrypted payload residue & filesystem metadata. |
-| **Forensic Undelete Detection** | None (Blind disk wipe without analysis) | **Deep Forensic Footprint Engine**: Discovers active files, unallocated clusters, transaction journals (`.fseventsd`), and OS trash remnants. |
-| **Hardware Controller Purge** | Generic user-space file overwriting / basic `dd` commands | **Native Controller Purge**: NVMe hardware crypto sanitize (`nvme sanitize -a crypto`), ATA Enhanced Security Erase, and HPA/DCO boundary unfreezing. |
-| **Circular Economy Scoring** | None | **Automated ITAD Triage**: Multi-metric SMART telemetry & wear analysis outputting Green (Resale), Yellow (Internal Reuse), or Red (Shred). |
-| **Cryptographic Provenance** | Unsigned simulated PDF certificates | **NIST P-256 ECDSA Digital Signatures**: Cryptographically binds hardware serial, nonce, and erasure digest with instant verification API. |
-| **Audit Ledger** | Local non-persistent session state | **Enterprise Dual-Ledger Architecture**: Persistent PostgreSQL & SQLite historical records with downloadable compliance certs. |
-
----
-
-## 💾 Centralized Historical Audit Ledger
-
-WipeX provides an integrated **History & Audit Registry**:
-1. **Wipe Sessions Ledger**: Complete chronological ledger of every sanitization operation:
-   - Device ID & Hardware Serial Number
-   - Media Architecture & Sanitization Standard Executed
-   - Sector Count & Mathematical Audit Result
-   - Operator Timestamp & Execution Duration
-2. **Certificate Vault**:
-   - Centralized searchable catalog of all issued compliance certificates.
-   - On-demand PDF export and cryptographic verification.
-   - Dual database synchronization (PostgreSQL data center cluster + local SQLite `wipex.db`).
-
----
-
-## 🛡️ Security & Cryptographic Specifications
-
-### 1. Shannon Entropy Formula
-$$	ext{Entropy } H(X) = -\sum_{i=0}^{255} P(x_i) \log_2 P(x_i)$$
-- **Purged/Zeroed State**: $H(X) = 0.000000 	ext{ bits/byte}$
-- **Filesystem Remnants / Metadata**: $0.050000 - 1.200000 	ext{ bits/byte}$
-- **Plaintext Data**: $3.500000 - 6.500000 	ext{ bits/byte}$
-- **Encrypted / Random Data**: $7.990000 - 8.000000 	ext{ bits/byte}$
-
-### 2. Digital Signature Specification
-- **Algorithm**: ECDSA over NIST P-256 (secp256r1) with SHA-256
-- **Encoding**: ASN.1 DER (Base64-encoded)
-- **Canonical Digest**:
-  $$	ext{Digest} = 	ext{SHA256}(	ext{Serial} \mathbin{\Vert} 	ext{Model} \mathbin{\Vert} 	ext{Nonce} \mathbin{\Vert} 	ext{Method} \mathbin{\Vert} 	ext{Timestamp} \mathbin{\Vert} 	ext{Outcome})$$
+| **Access Model** | Unrestricted public repo / executable | **Restricted B2B Architecture**: KYC & enterprise compliance accreditation required. |
+| **Method Selection UI** | Basic card grid with radio options | **ZeroTrace-Grid Layout with Enterprise Telemetry**: Smart matching, regulatory tiers, and estimated sanitization durations. |
+| **Verification Engine** | Blind Zero Check (`buf == 0x00`) | **Mathematical Shannon Entropy $H(X) = 0.000000$**: 10,000 sampled LBAs capturing encrypted slack & pseudo-random residue. |
+| **Forensic Undelete Detection** | None | **Live Deep Forensic Scanner**: Detects unallocated sectors, OS Trash files, and `.fseventsd` transaction journals. |
+| **Hardware Controller Purge** | OS user-space byte writes | **Native Hardware Purge**: SES=2 NVMe Crypto Erase, ATA Security Erase, and HPA/DCO boundary unfreezing. |
+| **Drive Disposition Triage** | None | **Automated Circular Economy Triage**: Green (Resale), Yellow (Internal Reuse), Red (Shred Order). |
+| **Audit Ledger Persistence** | Ephemeral browser storage | **Dual Database Ledger**: PostgreSQL + SQLite syncing dynamic sessions and tamper-proof certificates. |
+| **Digital Certificates** | Simulated visual templates | **NIST P-256 ECDSA Signed Cryptographic Proofs**: Tamper-evident cryptographic verification portal. |
