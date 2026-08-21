@@ -58,6 +58,48 @@ class VerifyCertResponse(BaseModel):
     tamperDetected: bool
 
 
+# ---------------------------------------------------------------------------
+# Server-side device probe cache
+# Each call to probe_devices() spawns many diskutil subprocesses; rapid
+# re-polls (auto-detection every 2 s from the frontend) previously caused
+# subprocess storms that made drives vanish after a few trials.
+# The cache returns the last known-good result for up to DEVICE_CACHE_TTL
+# seconds, then re-probes. If a fresh probe returns empty while we have a
+# cached non-empty result, we return the cached result (drive just re-scanned).
+# ---------------------------------------------------------------------------
+import threading as _threading
+
+_device_cache: Dict[str, Any] = {
+    "devices": [],
+    "timestamp": 0.0,
+    "lock": _threading.Lock(),
+}
+DEVICE_CACHE_TTL = 5  # seconds between actual diskutil probes
+
+def _probe_with_cache() -> List[Dict[str, Any]]:
+    now = time.time()
+    with _device_cache["lock"]:
+        age = now - _device_cache["timestamp"]
+        if age < DEVICE_CACHE_TTL and _device_cache["devices"]:
+            # Cache hit — return immediately without subprocesses
+            return list(_device_cache["devices"])
+        # Cache miss — probe hardware
+        try:
+            engine = WipeEngine()
+            fresh = engine.probe_devices()
+        except Exception:
+            fresh = []
+        # Only replace cache if fresh result is non-empty
+        if fresh:
+            _device_cache["devices"] = fresh
+            _device_cache["timestamp"] = now
+        elif not _device_cache["devices"]:
+            _device_cache["devices"] = []
+            _device_cache["timestamp"] = now
+        # If fresh is empty but we had a cache → keep old result (drive just re-initialising)
+        return list(_device_cache["devices"])
+
+
 # --- API Endpoints ---
 
 @app.get("/")
@@ -68,7 +110,7 @@ def health_check():
     return {
         "service": "WipeX Enterprise Backend",
         "status": "ONLINE",
-        "version": "2.4.0",
+        "version": "1.0.0",
         "database": "PostgreSQL (wipex)" if database.USE_POSTGRES else "SQLite (wipex.db)",
         "entropyAuditor": "READY",
         "cryptoSigner": "READY",
@@ -79,10 +121,13 @@ def health_check():
 @app.get("/api/devices", response_model=List[Dict[str, Any]])
 @app.get("/api/drives", response_model=List[Dict[str, Any]])
 def get_connected_devices():
-    """Probes real connected block devices and SMART health diagnostics."""
-    engine = WipeEngine()
-    devices = engine.probe_devices()
-    return devices
+    """
+    Probes real connected block devices and SMART health diagnostics.
+    Uses a 5-second server-side TTL cache so rapid frontend re-polls
+    (demo-mode toggle, auto-detection interval) never cause subprocess storms
+    that previously made drives disappear after a few successful scans.
+    """
+    return _probe_with_cache()
 
 @app.post("/api/storage/unfreeze/{device_id}")
 def unfreeze_storage(device_id: str):

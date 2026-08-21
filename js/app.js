@@ -186,10 +186,13 @@ class WipeXApp {
 
   startAutoDetection() {
     if (this._autoDetectTimer) clearInterval(this._autoDetectTimer);
+    this._autoDetectPending = false; // lock flag — prevents overlapping concurrent polls
     this._autoDetectTimer = setInterval(async () => {
-      // Auto-detection runs only on Step 1 when in Real Hardware mode (demoMode is OFF) and not actively wiping
+      // Poll only on Step 1, in Real Hardware mode, not actively wiping
       if (this.demoMode || this.isWiping || this.wipeCompleted || this.currentPhase > 1) return;
-
+      // Prevent concurrent overlapping requests
+      if (this._autoDetectPending) return;
+      this._autoDetectPending = true;
       try {
         const res = await this.fetchBackend('/api/devices');
         if (!res || !res.ok) return;
@@ -236,8 +239,10 @@ class WipeXApp {
         }
       } catch (e) {
         // Background polling silent failure
+      } finally {
+        this._autoDetectPending = false;
       }
-    }, 2000);
+    }, 8000); // Poll every 8s — server TTL cache is 5s so this avoids subprocess storms
   }
 
   selectDeviceById(deviceId) {

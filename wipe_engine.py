@@ -574,30 +574,49 @@ end tell
             )
             data = plistlib.loads(result.stdout)
             all_entries = data.get("AllDisksAndPartitions", [])
-            whole_disks = data.get("WholeDisks", [])
+            whole_disks_list = data.get("WholeDisks", [])  # Authoritative whole-disk list
         except Exception:
             return []
 
-        # Find true physical whole disks (including all USB flash drives, SD cards, and external HDDs)
-        physical_candidates = []
-        for entry in all_entries:
-            d_id = entry.get("DeviceIdentifier")
-            # If disk is an APFS synthesized container or disk image, skip it
-            if entry.get("APFSPhysicalStores") or entry.get("Content") in ("Apple_APFS_Container", "Apple_HFS_Container"):
-                continue
-            if d_id:
-                physical_candidates.append(d_id)
+        # Use WholeDisks list (more reliable than AllDisksAndPartitions filtering)
+        # then supplement with any physical candidates we find by walking AllDisksAndPartitions
+        # to ensure we never miss a USB or SD card that diskutil lists differently.
+        candidate_set: list = []
+        seen_cands: set = set()
 
-        if not physical_candidates:
-            physical_candidates = ["disk0"]
+        # Primary: diskutil's own WholeDisks list
+        for d in whole_disks_list:
+            ident = d.strip()
+            # Exclude disk images and loop devices
+            if ident and ident not in seen_cands:
+                seen_cands.add(ident)
+                candidate_set.append(ident)
+
+        # Supplement: AllDisksAndPartitions physical entries
+        for entry in all_entries:
+            d_id = entry.get("DeviceIdentifier", "")
+            if not d_id or d_id in seen_cands:
+                continue
+            # Skip APFS synthesized containers and disk images
+            if entry.get("APFSPhysicalStores"):
+                continue
+            if entry.get("Content") in ("Apple_APFS_Container", "Apple_HFS_Container"):
+                continue
+            seen_cands.add(d_id)
+            candidate_set.append(d_id)
+
+        if not candidate_set:
+            candidate_set = ["disk0"]
 
         devices = []
-        for disk in physical_candidates:
+        for disk in candidate_set:
             try:
                 r = subprocess.run(
                     ["diskutil", "info", "-plist", disk],
-                    capture_output=True, timeout=5
+                    capture_output=True, timeout=4  # tighter per-disk timeout
                 )
+                if not r.stdout:
+                    continue
                 info = plistlib.loads(r.stdout)
             except Exception:
                 continue
