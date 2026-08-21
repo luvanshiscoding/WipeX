@@ -198,24 +198,24 @@
         // Draw node aura
         const currentRadius = n1.radius + Math.sin(n1.pulse) * 1.3;
         ctx.beginPath();
-        ctx.arc(n1.x, n1.y, currentRadius * 2.2, 0, Math.PI * 2);
+        ctx.arc(n1.x, n1.y, currentRadius * 2.0, 0, Math.PI * 2);
         ctx.fillStyle = n1.color;
-        ctx.globalAlpha = 0.15;
+        ctx.globalAlpha = 0.08;
         ctx.fill();
 
         ctx.beginPath();
         ctx.arc(n1.x, n1.y, currentRadius, 0, Math.PI * 2);
         ctx.fillStyle = n1.color;
-        ctx.globalAlpha = 0.9;
-        ctx.shadowBlur = 12;
+        ctx.globalAlpha = 0.45;
+        ctx.shadowBlur = 8;
         ctx.shadowColor = n1.color;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1.0;
 
-        // Node floating label
+        // Node floating label (subtle background watermark opacity)
         ctx.font = "10px JetBrains Mono, monospace";
-        ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.38)";
         ctx.fillText(n1.label, n1.x + 8, n1.y + 3);
       }
     }

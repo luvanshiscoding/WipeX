@@ -2406,26 +2406,33 @@ body:not(.demo-mode-active) .demo-only-feature {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 22px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 .title-gradient {
-  font-size: 52px;
-  font-weight: 850;
-  letter-spacing: -1px;
-  background: linear-gradient(135deg, #ffffff 30%, #00f0ff 70%, #00ff88 100%);
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: -1.5px;
+  background: linear-gradient(135deg, #ffffff 20%, #00f0ff 65%, #00ff88 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 0 40px rgba(0, 240, 255, 0.35);
-  line-height: 1.1;
+  filter: drop-shadow(0 4px 20px rgba(0, 240, 255, 0.45));
+  line-height: 1.05;
 }
 
 .title-subtext {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
   letter-spacing: -0.2px;
+  background: rgba(10, 15, 26, 0.75);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  padding: 6px 18px;
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
 /* Cyber Terminal Box */
