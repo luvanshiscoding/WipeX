@@ -1,0 +1,319 @@
+/**
+ * WipeX frontend core: API client, job polling, formatting, icons, toasts,
+ * modals, file picker and operator identity.
+ */
+
+// ── API ────────────────────────────────────────────────────────────────────
+const API_BASE = (() => {
+  const h = window.location.hostname;
+  // Vite proxies /api to the backend; when opened some other way fall back to the default port
+  return window.location.port === '5173' || window.location.port === '4173' ? '' : `http://${h || '127.0.0.1'}:8000`;
+})();
+
+export class ApiError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+
+export async function api(path, { method = 'GET', body, raw = false } = {}) {
+  let res;
+  try {
+    res = await fetch(API_BASE + path, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+  } catch (e) {
+    throw new ApiError(0, 'Cannot reach the WipeX engine. Start it with: python -m uvicorn main:app --port 8000');
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = j.detail || detail; } catch { /* not json */ }
+    throw new ApiError(res.status, typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  return raw ? res : res.json();
+}
+
+export const apiUrl = (path) => API_BASE + path;
+
+/** Poll a background job until it finishes; onUpdate receives each snapshot. */
+export async function waitForJob(jobId, onUpdate, interval = 600) {
+  for (;;) {
+    const job = await api(`/api/jobs/${jobId}`);
+    onUpdate && onUpdate(job);
+    if (job.status !== 'RUNNING') return job;
+    await sleep(interval);
+  }
+}
+
+export const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ── Formatting ─────────────────────────────────────────────────────────────
+export function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+export function bytes(n) {
+  n = Number(n) || 0;
+  if (n < 1000) return `${n} B`;
+  const u = ['KB', 'MB', 'GB', 'TB'];
+  let i = -1;
+  do { n /= 1000; i++; } while (n >= 1000 && i < u.length - 1);
+  return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
+}
+
+export function when(ts) {
+  if (!ts) return '—';
+  const d = new Date(String(ts).replace(' UTC', 'Z').replace(' ', 'T'));
+  return isNaN(d) ? String(ts) : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export function ago(ts) {
+  const d = new Date(String(ts).replace(' UTC', 'Z').replace(' ', 'T'));
+  if (isNaN(d)) return '';
+  const s = Math.round((Date.now() - d) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+export const short = (h, n = 12) => h ? `${h.slice(0, n)}…` : '—';
+
+// ── Icons (inline SVG, stroke-based) ───────────────────────────────────────
+const P = {
+  overview: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  drive: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
+  fileX: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9.5 12.5l5 5M14.5 12.5l-5 5"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  recover: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+  cases: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/>',
+  audit: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>',
+  shield: '<path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  minus: '<path d="M6 12h12"/>',
+  alert: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+  disk: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h.01M11 14h6"/>',
+  hold: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+};
+export function icon(name, size = 16, sw = 1.9) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
+}
+
+// ── Toasts ─────────────────────────────────────────────────────────────────
+export function toast(message, tone = '') {
+  const root = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${tone}`;
+  el.innerHTML = `${icon(tone === 'bad' ? 'alert' : tone === 'ok' ? 'check' : 'info', 16)}<span>${esc(message)}</span>`;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), tone === 'bad' ? 7000 : 4000);
+}
+
+export function reportError(e) {
+  console.error(e);
+  toast(e.message || String(e), 'bad');
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────
+export function modal({ title, sub = '', body = '', actions = [], danger = false, wide = false, onMount }) {
+  return new Promise(resolve => {
+    const root = document.getElementById('modal-root');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">
+        <div class="modal-head ${danger ? 'danger' : ''}">
+          <div class="modal-title">${esc(title)}</div>
+          ${sub ? `<div class="modal-sub">${sub}</div>` : ''}
+        </div>
+        <div class="modal-body">${body}</div>
+        <div class="modal-foot">${actions.map((a, i) => `<button class="btn ${a.cls || 'btn-secondary'}" data-i="${i}">${esc(a.label)}</button>`).join('')}</div>
+      </div>`;
+    const close = (val) => { backdrop.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(null); });
+    backdrop.querySelectorAll('.modal-foot button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const a = actions[+btn.dataset.i];
+        if (a.value === undefined && a.onClick) {
+          const r = await a.onClick(backdrop);
+          if (r !== false) close(r);
+        } else close(a.value);
+      });
+    });
+    root.appendChild(backdrop);
+    onMount && onMount(backdrop, close);
+    const first = backdrop.querySelector('input, select, textarea, .btn-primary, .btn-danger');
+    first && first.focus();
+  });
+}
+
+/** Destructive confirmation: the user must type the confirmation word. */
+export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLabel = 'Erase', extra = '' }) {
+  return modal({
+    title, sub, danger: true,
+    body: `
+      <dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+      ${extra}
+      <div class="field">
+        <label for="confirm-word">Type <b>${word}</b> to confirm</label>
+        <input class="input mono" id="confirm-word" autocomplete="off" spellcheck="false">
+      </div>`,
+    actions: [
+      { label: 'Cancel', value: false },
+      { label: confirmLabel, cls: 'btn-danger', onClick: (bd) => {
+        if (bd.querySelector('#confirm-word').value.trim().toUpperCase() !== word) {
+          bd.querySelector('#confirm-word').focus();
+          toast(`Type ${word} to confirm`, 'bad');
+          return false;
+        }
+        return true;
+      } },
+    ],
+  });
+}
+
+// ── Operator identity ──────────────────────────────────────────────────────
+const OP_KEY = 'wipex_operator';
+export function getOperator() {
+  try { return localStorage.getItem(OP_KEY) || ''; } catch { return ''; }
+}
+export function renderOperator() {
+  const name = getOperator();
+  document.getElementById('operator-name').textContent = name || 'Set operator';
+  document.getElementById('operator-avatar').textContent = name ? name.split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() : '?';
+}
+export async function askOperator(reason = '') {
+  const res = await modal({
+    title: 'Who is operating this workstation?',
+    sub: reason || 'Your name is recorded in the tamper-evident audit log for every action you take.',
+    body: `<div class="field"><label for="op-name">Operator name</label><input class="input" id="op-name" value="${esc(getOperator())}" placeholder="e.g. Insp. A. Sharma"></div>`,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Save', cls: 'btn-primary', onClick: bd => bd.querySelector('#op-name').value.trim() || false }],
+  });
+  if (res) {
+    try { localStorage.setItem(OP_KEY, res); } catch { /* storage unavailable */ }
+    renderOperator();
+  }
+  return res || getOperator();
+}
+export async function requireOperator() {
+  return getOperator() || await askOperator('An operator name is required before erasing, acquiring evidence or changing a case.');
+}
+
+// ── File picker ────────────────────────────────────────────────────────────
+export function pickPaths({ title = 'Choose files or folders', start = '' } = {}) {
+  return new Promise(resolve => {
+    const chosen = new Set();
+    let current = start;
+    const render = async (bd) => {
+      const list = bd.querySelector('.picker-list');
+      list.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const data = await api(`/api/fs/list?path=${encodeURIComponent(current)}`);
+        current = data.path;
+        bd.querySelector('#picker-path').value = current;
+        bd.querySelector('#picker-up').disabled = !current;
+        list.innerHTML = data.entries.length ? data.entries.map(e => `
+          <div class="picker-item ${e.protected ? 'locked' : ''}" data-path="${esc(e.path)}" data-dir="${e.isDir ? 1 : 0}" title="${e.protected ? 'Protected location — cannot be erased' : ''}">
+            ${e.protected ? `<span>${icon('lock', 14)}</span>` : `<input type="checkbox" ${chosen.has(e.path) ? 'checked' : ''}>`}
+            <span class="${e.isDir ? 'dir' : ''}">${icon(e.isDir ? 'folder' : 'file', 16)}</span>
+            <span class="trunc">${esc(e.name)}</span>
+            <span class="muted small">${e.isDir ? '' : bytes(e.size)}</span>
+          </div>`).join('') : '<div class="empty">Empty folder</div>';
+        list.querySelectorAll('.picker-item').forEach(row => {
+          const cb = row.querySelector('input');
+          cb && cb.addEventListener('click', ev => { ev.stopPropagation(); cb.checked ? chosen.add(row.dataset.path) : chosen.delete(row.dataset.path); updateCount(bd); });
+          row.addEventListener('click', () => {
+            if (row.dataset.dir === '1') { current = row.dataset.path; render(bd); }
+            else if (cb) { cb.checked = !cb.checked; cb.checked ? chosen.add(row.dataset.path) : chosen.delete(row.dataset.path); updateCount(bd); }
+          });
+        });
+        bd._parent = data.parent;
+        bd._workspace = data.workspace;
+      } catch (e) { list.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    };
+    const updateCount = bd => { bd.querySelector('#picker-count').textContent = `${chosen.size} selected`; };
+    modal({
+      title, wide: true,
+      sub: 'Click a folder to open it; tick items to select them. Protected system locations are locked.',
+      body: `
+        <div class="picker-path">
+          <button class="btn btn-secondary btn-sm" id="picker-up" title="Up one level">${icon('up', 14)}</button>
+          <input class="input mono" id="picker-path" placeholder="Type a path and press Enter">
+          <button class="btn btn-secondary btn-sm" id="picker-ws">WipeX workspace</button>
+        </div>
+        <div class="picker-list"></div>
+        <div class="muted small" id="picker-count">0 selected</div>`,
+      actions: [{ label: 'Cancel', value: null }, { label: 'Add selected', cls: 'btn-primary', onClick: () => [...chosen] }],
+      onMount: (bd) => {
+        bd.querySelector('#picker-up').addEventListener('click', () => { current = bd._parent || ''; render(bd); });
+        bd.querySelector('#picker-ws').addEventListener('click', () => { current = bd._workspace || ''; render(bd); });
+        bd.querySelector('#picker-path').addEventListener('keydown', e => { if (e.key === 'Enter') { current = e.target.value; render(bd); } });
+        render(bd);
+      },
+    }).then(resolve);
+  });
+}
+
+// ── Small render helpers ───────────────────────────────────────────────────
+export function badge(text, tone = '') { return `<span class="badge ${tone}">${esc(text)}</span>`; }
+
+export function statusBadge(status) {
+  const map = {
+    COMPLETED: ['Completed', 'ok'], RUNNING: ['Running', 'info'], IN_PROGRESS: ['In progress', 'info'],
+    FAILED: ['Failed', 'bad'], VERIFICATION_FAILED: ['Verification failed', 'bad'],
+    PASS: ['Pass', 'ok'], FAIL: ['Fail', 'bad'], PARTIAL: ['Partial', 'warn'],
+    OPEN: ['Open', 'info'], CLOSED: ['Closed', ''],
+  };
+  const [t, tone] = map[status] || [status || '—', ''];
+  return badge(t, tone);
+}
+
+export function progressBlock(pct, message, running = true) {
+  return `
+    <div class="stack" style="gap:8px">
+      <div class="progress ${pct == null ? 'indeterminate' : ''}"><div style="width:${pct || 0}%"></div></div>
+      <div class="job-msg">${running ? '<span class="spinner"></span>' : ''}<span>${esc(message || '')}</span>${pct != null ? `<span class="spacer"></span><span class="mono">${pct}%</span>` : ''}</div>
+    </div>`;
+}
+
+export function checksList(checks = []) {
+  if (!checks.length) return '';
+  return `<div class="checks">${checks.map(c => {
+    const state = c.passed === true ? '' : c.passed === false ? 'bad' : 'skip';
+    const ic = c.passed === true ? 'check' : c.passed === false ? 'x' : 'minus';
+    return `<div class="check-row">
+      <span class="check-ic ${state}">${icon(ic, 13, 2.6)}</span>
+      <div><div class="check-name">${esc(c.name)}</div><div class="check-detail">${esc(describeCheck(c))}</div></div>
+      <span>${c.passed === true ? badge('Pass', 'ok') : c.passed === false ? badge('Fail', 'bad') : badge('Skipped')}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function describeCheck(c) {
+  if (c.name === 'Pattern read-back') {
+    return `Expected ${c.expected}; coverage ${c.coverage}; ${c.mismatchedRegions} mismatched region(s)` +
+      (c.unchangedBlocks ? `; ${c.unchangedBlocks} block(s) still hold old content` : '') +
+      (c.readErrors ? `; ${c.readErrors} read error(s)` : '');
+  }
+  if (c.name === 'Canary blocks') return `${c.planted} marker blocks planted before erasure; ${c.recovered} found afterwards`;
+  if (c.name === 'Recovery attempt (M3)') return c.skipped ? c.reason : c.detail;
+  return Object.entries(c).filter(([k]) => !['name', 'passed'].includes(k)).map(([k, v]) => `${k}: ${v}`).join('; ');
+}

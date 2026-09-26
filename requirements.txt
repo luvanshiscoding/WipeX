@@ -4,3 +4,7 @@ pydantic>=2.6.0
 requests>=2.31.0
 httpx>=0.28.0
 psycopg2-binary>=2.9.9
+cryptography>=42.0
+pytsk3>=20231007
+reportlab>=4.0
+Pillow>=10.0

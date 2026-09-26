@@ -1,87 +1,85 @@
-# WipeX — Enterprise System Specification & Technical Blueprint
+# WipeX — System Specification (SIH 2026 · SIH26149 · NTRO)
 
-> **System Mission**: WipeX is an Enterprise-Grade Zero-Trust Physical Data Sanitization, Mathematical Entropy Verification, and Tamper-Proof Certification Platform. Built exclusively for corporate IT asset governance, enterprise data centers, and accredited ITADs (IT Asset Disposition), WipeX guarantees that physical storage hardware (NVMe SSDs, SATA SSDs, Enterprise HDDs) is sanitized beyond forensic recovery according to **NIST SP 800-88 Rev. 1** and **IEEE 2883-2022**, validated through **Mathematical Shannon Entropy audits ($H(X) = 0.000000$)**, evaluated for reuse health via an automated **Circular Economy Triage engine**, and certified using **Hardware-Bound NIST P-256 ECDSA Cryptographic Proofs**.
+> **Mission:** One integrated forensic workstation that (a) securely erases drives, (b) securely erases individual files and folders together with their metadata traces, and (c) recovers deleted files from damaged or formatted media. Every operation is verified, logged and reported.
 
----
-
-## 🔒 Enterprise Access Governance & Business Model
-
-### 1. Restricted Enterprise-Only Access Architecture
-To prevent malicious misuse—such as criminal cyber-theft evidence destruction, forensics evasion, or unvetted data obliteration—WipeX is deliberately designed as a **Restricted B2B Compliance Platform**:
-- **Zero Public Access**: The platform is not deployed as an open consumer tool.
-- **Enterprise Identity Verification**: Prospective organizations (ITAD vendors, Enterprise IT asset teams, Defense & Telecom infrastructure teams) undergo formal corporate verification.
-- **Accreditation Vetting**: Verification of industry credentials (e.g., ISO 27001, R2v3, e-Stewards, NAID AAA).
-- **Cryptographic Tenant Provisioning**: Verified enterprise operators receive cryptographically signed workstation licenses tied to corporate hardware security keys.
+See [README.md](README.md) for the competitor landscape and research gaps (G1–G8) behind this design.
 
 ---
 
-## 🏛️ Master System Workflow Architecture
+## 1. Modules
+
+### M1 — Secure Drive Eraser (existing; extend)
+| Item | Spec |
+|---|---|
+| Inputs | Physical drive (SATA HDD/SSD, NVMe, USB, SD), Android device (ADB), raw disk image |
+| Methods | NIST 800-88 Clear (1-pass), DoD 3-pass, Gutmann 35-pass, NVMe Sanitize/Format SES, ATA Secure Erase, TCG Opal crypto-erase, physical-destroy order |
+| Method selection | By media type: flash media is steered to crypto/firmware purge; magnetic media to overwrite |
+| Safety | Boot-disk lock; **evidence lock** (refuses media under legal hold, G5); dual approval |
+| Verification | Pattern-aware read-back (G8) + Recovery-as-Verifier (G1) |
+| Output | ECDSA P-256 signed certificate (JSON/PDF) + audit-log entries |
+| Code | `wipe_engine.py`, `entropy_auditor.py`, `crypto_signer.py` |
+
+### M2 — Secure File & Folder Eraser (new)
+| Item | Spec |
+|---|---|
+| Inputs | File or folder paths on a mounted volume, or inside an image |
+| Content erasure | Overwrite (pattern per policy) → flush → rename to random name → truncate → unlink |
+| Metadata erasure | Timestamps, ADS / xattrs, and filename traces in parent directory |
+| Artifact cleanup (G2) | Windows: LNK, Jump Lists, thumbcache, Prefetch, Recent. NTFS: `$UsnJrnl` / `$I30` / VSS reporting. Linux: ext4 journal, thumbnails cache |
+| Storage policy (G3) | Detects SSD/TRIM, copy-on-write file systems (APFS, Btrfs, ReFS) and flash media; warns the operator and offers M1 escalation |
+| Verification | Re-scan with M3 for the erased file's signatures and name |
+| Code | `file_eraser.py` (planned) |
+
+### M3 — Advanced File Carving & Recovery (new)
+| Item | Spec |
+|---|---|
+| Inputs | Raw/dd image, E01 (optional), or read-only device handle |
+| Acquisition | Hash the source (SHA-256) → work only on a copy → log a custody event |
+| Techniques | (1) FS-metadata recovery: NTFS `$MFT`, FAT32/exFAT, ext4 deleted entries; (2) signature carving; (3) **structural validation**: JPEG markers, PNG CRC, PDF xref, ZIP/DOCX central directory, MP4 atoms; (4) bifragment gap carving for fragmented files |
+| Output | Recovered files + per-file SHA-256, offset, technique used, validation result, confidence score |
+| Code | `recovery/` package (planned) |
+
+---
+
+## 2. Cross-cutting Services
+| Service | Spec |
+|---|---|
+| **Audit log** | Append-only; each entry = `{seq, ts, actor, action, target, details, prev_hash, hash, signature}`; signature via `CryptoSigner.sign_payload`; `/api/audit/verify` recomputes the chain and reports the first break |
+| **Cases & custody** | Tables: `cases`, `evidence`, `custody_events`, `legal_holds`. Every M1/M2/M3 action references a case ID |
+| **Reports** | PDF (ReportLab) + JSON: recovery report, erasure certificate, BSA 2023 §63 annexure (G7) |
+| **Roles** | Investigator (M3), Sanitizer (M1/M2), Auditor (read-only logs and reports) |
+| **Benchmarks (G4)** | `benchmarks/` runs M3 on DFRWS 2006/2007, NIST CFReDS and Digital Corpora images; reports precision, recall and MB/s against PhotoRec and Scalpel |
+
+---
+
+## 3. Workflows
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                      WIPEX ENTERPRISE WORKFLOW ENGINE                             │
-└──────────────────────────────────────────────────────────────────────────────────┘
-
- [ View 0: 3D Cybersecurity Interactive Overview (v1.0) ]
-   │
-   ├─► Real-Time Particle Matrix & Perspective Horizon Canvas
-   ├─► 16 Floating Cryptographic Nodes with Dynamic Mouse-Reactive Laser Connections
-   └─► Line-by-Line Terminal Feature Typewriter Diagnostics
-   │
-   ▼
- [ Phase 1: Drive Discovery & Forensic Audit ]
-   │
-   ├─► Real Physical Topology (macOS diskutil / Linux lsblk / Windows IOCTL)
-   ├─► SMART Telemetry (Reallocated Sectors, Power-On Hours, Wear %, Temp)
-   └─► Forensic Footprint Engine (Active Files vs. Recoverable Deleted/Trash & FSEvents)
-   │
-   ▼
- [ Phase 2: Curated ITAD Sanitization Tier Selection (ZeroTrace-Grid Layout) ]
-   │
-   ├─► Standard ITAD Tier: NIST SP 800-88 Clear (0x00 Single-Pass)
-   ├─► NVMe Flash Tier: NIST SP 800-88 Crypto Purge (Hardware Controller Key Destruction)
-   ├─► SATA Flash Tier: NIST SP 800-88 Enhanced Security Erase (Voltage pulse + HPA/DCO unfreeze)
-   ├─► Magnetic Tier: DoD 5220.22-M (3-Pass: 0x00, 0xFF, PRNG)
-   ├─► Defense Tier: Peter Gutmann (35-Pass Overwrite)
-   └─► Damaged Drive Tier: NIST SP 800-88 Physical Disintegration Mandate (<2mm)
-   │
-   ▼
- [ Phase 3: Hardware Sanitization & 256-Cluster Matrix ]
-   │
-   ├─► Raw Block Kernel Streaming (/dev/rdiskX, /dev/sdX, \\.\\PhysicalDriveX)
-   ├─► 256-Cell Dynamic Cluster Matrix Visualizer with Live Throughput (MB/s) & Realistic ETA
-   └─► Anti-Corruption Lockout (🔒 Locks backward phases to prevent session tampering)
-   │
-   ▼
- [ Phase 4: Zero-Trust Verification & Circular Economy Safety Assessment ]
-   │
-   ├─► Mathematical Shannon Entropy Audit: H(X) = -sum(P(x) * log2(P(x))) across 10,000 LBAs
-   │     • Target: H(X) == 0.000000 bits/byte (100% Certified Data Destruction)
-   │     • Non-Zero / Slack Residue Detected -> Instant Audit Fail
-   └─► Circular Economy Triage:
-         • 🟢 GREEN (Safe for Secondary Market / Resale)
-         • 🟡 YELLOW (Internal Corporate Redeployment Only)
-         • 🔴 RED (Mandatory Physical Shred Destruction Order)
-   │
-   ▼
- [ Phase 5: Hardware-Bound NIST P-256 ECDSA Certificate ]
-   │
-   ├─► Canonical SHA-256 Digest: Serial + Model + Nonce + Standard + Timestamp + Triage
-   ├─► Asymmetric Signature: Signed via NIST P-256 Private Key
-   └─► Dynamic Session & Certificate Ledger Logging
+RECOVER:   Case → Acquire (hash) → Parse FS → Carve → Validate → Review → Signed report
+ERASE:     Case check (legal hold?) → Dual approval → Erase (M1/M2) → Verify:
+                pattern read-back (G8) → Recovery-as-Verifier with M3 (G1) → Signed certificate
+AUDIT:     Every step → hash-chained, signed log entry → verifiable at any time
 ```
 
 ---
 
-## 🔬 WipeX vs. ZeroTrace: Deep Technical Comparison
+## 4. API Surface (implemented — `main.py`, docs at `/docs`)
+| Area | Endpoints |
+|---|---|
+| Health | `GET /api/health` (capabilities, admin rights, counts) |
+| M1 devices & erasure | `GET /api/devices?refresh=`, `GET /api/methods`, `POST /api/wipe/start`, `GET /api/wipe/status/{id}`, `POST /api/audit/run/{id}` (verification) |
+| Certificates | `POST /api/certificates/generate`, `GET /api/verify/{id or serial}` (exact match), `GET /api/certificates/{id}/pdf`, `GET /api/certificates` |
+| Lab images | `GET/POST /api/lab/images`, `POST /api/lab/images/{id}/reset`, `DELETE /api/lab/images/{id}` |
+| M2 files | `GET /api/fs/list`, `POST /api/files/analyze`, `POST /api/files/erase` (job), `POST /api/files/sandbox`, `GET /api/files/report/{job}.pdf` |
+| M3 recovery | `POST /api/recovery/scan` (job), `GET /api/recovery/file`, `GET /api/recovery/{job}/report.pdf`, `GET /api/recovery/formats`, `POST /api/benchmark` (job) |
+| Jobs | `GET /api/jobs`, `GET /api/jobs/{id}` |
+| Cases | `GET/POST /api/cases`, `GET /api/cases/{id}`, `POST /api/cases/{id}/status`, `POST /api/cases/{id}/evidence` (job), `POST /api/evidence/{id}/verify` |
+| Holds & policy | `POST /api/cases/{id}/holds`, `POST /api/holds/{id}/release`, `GET /api/holds`, `GET/POST /api/settings/dual-approval` |
+| Audit | `GET /api/audit/log`, `GET /api/audit/verify`, `GET /api/audit/export` |
+| Android | `GET /api/devices/android`, `POST /api/wipe/android/start` |
 
-| Technical Dimension | ZeroTrace | WipeX Enterprise Platform |
-|---|---|---|
-| **Access Model** | Unrestricted public repo / executable | **Restricted B2B Architecture**: KYC & enterprise compliance accreditation required. |
-| **Method Selection UI** | Basic card grid with radio options | **ZeroTrace-Grid Layout with Enterprise Telemetry**: Smart matching, regulatory tiers, and estimated sanitization durations. |
-| **Verification Engine** | Blind Zero Check (`buf == 0x00`) | **Mathematical Shannon Entropy $H(X) = 0.000000$**: 10,000 sampled LBAs capturing encrypted slack & pseudo-random residue. |
-| **Forensic Undelete Detection** | None | **Live Deep Forensic Scanner**: Detects unallocated sectors, OS Trash files, and `.fseventsd` transaction journals. |
-| **Hardware Controller Purge** | OS user-space byte writes | **Native Hardware Purge**: SES=2 NVMe Crypto Erase, ATA Security Erase, and HPA/DCO boundary unfreezing. |
-| **Drive Disposition Triage** | None | **Automated Circular Economy Triage**: Green (Resale), Yellow (Internal Reuse), Red (Shred Order). |
-| **Audit Ledger Persistence** | Ephemeral browser storage | **Dual Database Ledger**: PostgreSQL + SQLite syncing dynamic sessions and tamper-proof certificates. |
-| **Digital Certificates** | Simulated visual templates | **NIST P-256 ECDSA Signed Cryptographic Proofs**: Tamper-evident cryptographic verification portal. |
+## 5. Non-functional Requirements
+- **Forensic soundness:** recovery never writes to source media; all analysis runs on hashed working copies.
+- **Offline:** no network dependency at runtime (air-gapped deployment).
+- **Honesty:** every report states the verification level actually reached (e.g. "Clear, file-level, SSD: physical erasure not guaranteed").
+- **Portability:** Windows 10/11, Linux (hardware sanitize commands), macOS.

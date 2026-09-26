@@ -10,3 +10,10 @@ env/
 dist/
 build/
 *.db
+
+# Local signing keys (generated per workstation on first run)
+keys/
+
+# Workspace: lab images, case evidence, recovered files, reports
+workspace/
+*.bak
