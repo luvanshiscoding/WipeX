@@ -1,10 +1,10 @@
 """
 WipeX - Drive erasure engine (module M1) with verification and certificates.
 
-Overwrite methods follow NIST SP 800-88 (Clear); hardware methods call the device's
-own sanitize commands through nvme-cli / hdparm / sedutil-cli (Purge).
+Overwrite methods follow NIST SP 800-88 (Clear); hardware methods ask the device's own
+controller to sanitize itself (Purge) - see hw_sanitize.py for the per-OS paths.
 
-Verification (research gaps G1 + G8):
+Verification:
   * pattern-aware read-back: the final pass is either a fixed byte or a keyed
     AES-256-CTR stream, so the verifier regenerates exactly what every sampled block
     must contain (entropy alone cannot distinguish "random wipe" from "encrypted data");
@@ -30,8 +30,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import audit_log
 import cases
 import database
+import hw_sanitize
 import lab_images
 import store
+import users
 from crypto_signer import CryptoSigner
 
 try:
@@ -70,9 +72,23 @@ CREATE TABLE IF NOT EXISTS cert_proofs (
 """
 
 
+_tables_ready_for: Optional[str] = None
+# Operator-supplied secrets for a queued job (e.g. an Opal PSID); kept in memory only
+_job_params: Dict[str, Dict[str, Any]] = {}
+
+
 def _init_tables() -> None:
+    global _tables_ready_for
+    if _tables_ready_for == store.DB_FILE:
+        return
     with store.tx() as conn:
         conn.executescript(_EXTRA_SCHEMA)
+        for table, cols in (("erasures", ("approval",)), ("cert_proofs", ("operator_key_id", "operator_sig"))):
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for col in cols:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+    _tables_ready_for = store.DB_FILE
 
 
 def _now() -> str:
@@ -95,8 +111,9 @@ METHODS: Dict[str, Dict[str, Any]] = {
     "random_pass": {"name": "Single-pass random overwrite", "category": "Clear", "passes": ["prng"]},
     "dod_5220_22_m": {"name": "DoD 5220.22-M three-pass overwrite", "category": "Clear", "passes": [b"\x00", b"\xFF", "prng"]},
     "gutmann": {"name": "Gutmann 35-pass overwrite", "category": "Clear", "passes": _gutmann()},
-    "crypto_erase": {"name": "Cryptographic Erase (NVMe Sanitize / TCG Opal)", "category": "Purge", "hardware": "crypto"},
-    "ata_sanitize": {"name": "ATA Enhanced Secure Erase", "category": "Purge", "hardware": "ata"},
+    "crypto_erase": {"name": "Cryptographic Erase (NVMe Sanitize / TCG Opal PSID revert)", "category": "Purge", "hardware": "crypto"},
+    "block_erase": {"name": "NVMe Sanitize Block Erase", "category": "Purge", "hardware": "block"},
+    "ata_sanitize": {"name": "ATA Enhanced Security Erase", "category": "Purge", "hardware": "ata"},
     "destroy": {"name": "Physical destruction", "category": "Destroy", "destroy": True},
 }
 ALIASES = {
@@ -114,10 +131,17 @@ def resolve_method(method_id: str) -> Tuple[str, Dict[str, Any]]:
     return mid, METHODS[mid]
 
 
+_PLATFORMS = {
+    "crypto": ["Linux (nvme-cli, sedutil-cli)", "Windows (NVMe driver, sedutil-cli)"],
+    "block": ["Linux (nvme-cli)", "Windows (NVMe driver)"],
+    "ata": ["Linux (hdparm)"],
+}
+
+
 def method_catalog() -> List[Dict[str, Any]]:
     return [{"id": k, "name": v["name"], "category": v["category"],
              "passes": len(v.get("passes", [])), "hardware": v.get("hardware"),
-             "platforms": ["Linux"] if v.get("hardware") else ["Windows", "Linux", "macOS", "Disk images"]}
+             "platforms": _PLATFORMS.get(v.get("hardware"), ["Windows", "Linux", "macOS", "Disk images"])}
             for k, v in METHODS.items()]
 
 
@@ -182,6 +206,14 @@ def _read(f, offset: int, length: int) -> bytes:
     return f.read(length)
 
 
+def _io_path(dev: Dict[str, Any]) -> str:
+    """macOS: use the raw character device (/dev/rdiskN) for unbuffered, much faster I/O."""
+    path = dev["devicePath"]
+    if platform.system() == "Darwin" and not dev.get("isImage") and path.startswith("/dev/disk"):
+        return "/dev/r" + path[len("/dev/"):]
+    return path
+
+
 def _prepare_physical(dev: Dict[str, Any]) -> None:
     """Release OS locks on a physical disk so raw writes succeed; raises with a clear reason."""
     path = dev["devicePath"]
@@ -211,8 +243,13 @@ def _restore_physical(dev: Dict[str, Any]) -> None:
 
 # ── Job entry points ─────────────────────────────────────────────────────────
 
-def start(device_id: str, method_id: str, operator: str, approver: str = "", case_id: Optional[str] = None) -> Dict[str, Any]:
-    """Validate the request, record it, and return the wipe id. Execution runs in a background thread."""
+def start(device_id: str, method_id: str, operator: str, approver: str = "", case_id: Optional[str] = None,
+          approval: Optional[Dict[str, Any]] = None, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Validate the request, record it, and return the wipe id. Execution runs in a background thread.
+    approval: signed record from users.approve() when the two-person rule is on.
+    options: operator inputs for hardware methods (e.g. {"psid": ...}); never written to disk.
+    """
     _init_tables()
     mid, method = resolve_method(method_id)
     dev = resolve_target(device_id)
@@ -226,8 +263,16 @@ def start(device_id: str, method_id: str, operator: str, approver: str = "", cas
         audit_log.append("erasure.blocked_by_hold", operator, target=dev.get("devicePath"), case_id=hold["case_id"],
                          details={"holdId": hold["id"], "method": mid})
         raise PermissionError(f"Device is under legal hold {hold['id']} (case {hold['case_id']})")
-    if method.get("hardware") and dev.get("isImage"):
-        raise ValueError("Hardware purge commands need a physical NVMe/SATA device; use an overwrite method for disk images")
+    if method.get("hardware"):
+        if dev.get("isImage"):
+            raise ValueError("Hardware purge commands need a physical NVMe/SATA device; use an overwrite method for disk images")
+        caps = hw_sanitize.capabilities(dev)
+        kind = method["hardware"]
+        usable = caps.get(kind, {}).get("available") or (
+            kind == "crypto" and (options or {}).get("psid") and caps.get("opal", {}).get("available"))
+        if not usable:
+            raise ValueError(f"{method['name']} is not available for this device: "
+                             f"{caps.get(kind, {}).get('reason') or 'not supported'}")
 
     wipe_id = f"WIPE-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2).upper()}"
     nonce = CryptoSigner.generate_nonce()
@@ -235,10 +280,15 @@ def start(device_id: str, method_id: str, operator: str, approver: str = "", cas
     device_snapshot = {k: dev.get(k) for k in ("id", "devicePath", "model", "serialNumber", "type", "interface",
                                                "capacity", "capacityBytes", "isImage", "reallocatedSectors")}
     with store.tx() as conn:
-        conn.execute("INSERT INTO erasures(wipe_id,device,method,operator,approver,status,started_at) VALUES(?,?,?,?,?,?,?)",
-                     (wipe_id, json.dumps(device_snapshot), mid, operator, approver, "IN_PROGRESS", _now()))
+        conn.execute("INSERT INTO erasures(wipe_id,device,method,operator,approver,status,started_at,approval) "
+                     "VALUES(?,?,?,?,?,?,?,?)",
+                     (wipe_id, json.dumps(device_snapshot), mid, operator, approver, "IN_PROGRESS", _now(),
+                      json.dumps(approval) if approval else None))
+    if options:
+        _job_params[wipe_id] = dict(options)
     audit_log.append("erasure.started", operator, target=dev.get("devicePath"), case_id=case_id,
                      details={"wipeId": wipe_id, "method": mid, "approver": approver or None,
+                              "approvalSignature": (approval or {}).get("signature"),
                               "serial": dev.get("serialNumber"), "model": dev.get("model")})
     return {"wipeId": wipe_id, "nonce": nonce, "method": mid, "device": device_snapshot}
 
@@ -254,7 +304,8 @@ def run(wipe_id: str) -> Dict[str, Any]:
     mid, method = resolve_method(row["method"])
     key = hashlib.sha256(("WIPEX-PASS-KEY:" + rec["pre_wipe_nonce"] + wipe_id).encode()).digest()
     capacity = int(dev.get("capacityBytes") or 0)
-    path = dev["devicePath"]
+    path = _io_path(dev)
+    params = _job_params.pop(wipe_id, {})
 
     def progress(pct: int, speed: str, msg: str, status: str = "IN_PROGRESS"):
         database.update_wipe_progress(wipe_id, pct, status, speed, msg)
@@ -284,7 +335,8 @@ def run(wipe_id: str) -> Dict[str, Any]:
             execution["canariesPlanted"] = len(canaries)
 
             if method.get("hardware"):
-                ok, msg = _hardware_purge(dev, method["hardware"])
+                ok, msg = hw_sanitize.purge(dev, method["hardware"], params,
+                                            progress=lambda p, m: progress(p, "—", m))
                 execution["hardware"] = {"ok": ok, "message": msg}
                 if not ok:
                     raise RuntimeError(f"Hardware purge failed: {msg}")
@@ -359,19 +411,6 @@ def _plant_canaries(f, capacity: int, n: int) -> List[Dict[str, Any]]:
     f.flush()
     os.fsync(f.fileno())
     return out
-
-
-def _hardware_purge(dev: Dict[str, Any], kind: str) -> Tuple[bool, str]:
-    if platform.system() != "Linux":
-        return False, "Hardware sanitize commands are issued through nvme-cli/hdparm/sedutil-cli on Linux"
-    from wipe_engine import WipeEngine
-    eng = WipeEngine()
-    path = dev["devicePath"]
-    if kind == "crypto":
-        if "nvme" in path:
-            return eng._execute_hardware_nvme_sanitize(path, "crypto")
-        return eng._execute_hardware_sed_opal(path)
-    return eng._execute_hardware_ata_secure_erase(path, enhanced=True)
 
 
 def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: List[int], before: Dict[int, str],
@@ -450,7 +489,7 @@ def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: Li
 
 
 def recovery_as_verifier(path: str, capacity: int, progress=None) -> Dict[str, Any]:
-    """Run WipeX's own recovery engine against the erased target (research gap G1)."""
+    """Run WipeX's own recovery engine against the erased target: erasure passes only if nothing is recoverable."""
     if capacity > RECOVERY_VERIFY_LIMIT:
         return {"name": "Recovery attempt (M3)", "skipped": True, "passed": None,
                 "reason": "Target larger than 8 GiB; recovery attempt skipped (pattern check still applies)"}
@@ -475,7 +514,7 @@ def get(wipe_id: str) -> Optional[Dict[str, Any]]:
     row = store.query_one("SELECT * FROM erasures WHERE wipe_id=?", (wipe_id,))
     if not row:
         return None
-    for k in ("device", "execution", "verification"):
+    for k in ("device", "execution", "verification", "approval"):
         row[k] = json.loads(row[k]) if row.get(k) else None
     return row
 
@@ -514,11 +553,13 @@ def issue_certificate(wipe_id: str, actor: str = "system") -> Dict[str, Any]:
                    "passes": [p["pattern"] for p in exe.get("passes", [])]},
         "verification": {"verdict": verdict, "checks": ver.get("checks", []), "meanEntropy": ver.get("meanEntropy")},
         "operator": er.get("operator"), "approver": er.get("approver") or None,
+        "approval": er.get("approval"),
         "nonce": rec["pre_wipe_nonce"] if rec else None, "outcome": outcome,
     }
     canonical = json.dumps(canonical_obj, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     signature = CryptoSigner.sign_payload(canonical)
+    personal = users.sign_current(actor, canonical) or {}
     cert = {
         "certificateId": cert_id, "wipe_id": wipe_id, "deviceModel": dev.get("model") or "Unknown",
         "serialNumber": dev.get("serialNumber") or "Unknown", "storageType": dev.get("type") or "Unknown",
@@ -530,8 +571,10 @@ def issue_certificate(wipe_id: str, actor: str = "system") -> Dict[str, Any]:
     }
     database.save_certificate(cert)
     with store.tx() as conn:
-        conn.execute("INSERT INTO cert_proofs(certificate_id,wipe_id,canonical,signature,public_key,issued_at) VALUES(?,?,?,?,?,?)",
-                     (cert_id, wipe_id, canonical, signature, CryptoSigner.get_public_key_pem(), issued))
+        conn.execute("INSERT INTO cert_proofs(certificate_id,wipe_id,canonical,signature,public_key,issued_at,"
+                     "operator_key_id,operator_sig) VALUES(?,?,?,?,?,?,?,?)",
+                     (cert_id, wipe_id, canonical, signature, CryptoSigner.get_public_key_pem(), issued,
+                      personal.get("keyId"), personal.get("signature")))
     audit_log.append("certificate.issued", actor, target=cert_id, details={"wipeId": wipe_id, "outcome": outcome, "sha256": digest})
     return lookup_certificate(cert_id)
 
@@ -561,10 +604,24 @@ def lookup_certificate(query: str) -> Optional[Dict[str, Any]]:
             tampered_fields.append("outcome")
         if ledger.get("sha256Digest") != hashlib.sha256(row["canonical"].encode()).hexdigest():
             tampered_fields.append("digest")
-    valid = sig_ok and not tampered_fields
+    # Personal signatures: the user who issued the certificate and, if required, the approver
+    issuer = None
+    if row.get("operator_sig"):
+        key = users.public_key(row.get("operator_key_id") or "") or {}
+        issuer = {"user": key.get("username"), "keyId": row.get("operator_key_id"),
+                  "valid": users.verify_user_signature(row.get("operator_key_id") or "", row["canonical"], row["operator_sig"])}
+    approval = canonical.get("approval")
+    approval_check = None
+    if approval:
+        approval_check = {"user": approval.get("approver"), "keyId": approval.get("keyId"),
+                          "valid": users.verify_user_signature(approval.get("keyId", ""), approval.get("payload", ""),
+                                                               approval.get("signature", ""), approval.get("approver"))}
+    valid = sig_ok and not tampered_fields and (issuer is None or issuer["valid"]) and \
+        (approval_check is None or approval_check["valid"])
     return {
         "certificateId": row["certificate_id"], "wipeId": row["wipe_id"], "isValid": valid,
         "signatureValid": sig_ok, "tamperDetected": not valid, "tamperedFields": tampered_fields,
+        "issuerSignature": issuer, "approvalSignature": approval_check,
         "issueDate": canonical["issued"], "deviceModel": canonical["device"]["model"],
         "serialNumber": canonical["device"]["serial"], "storageType": canonical["device"]["type"],
         "capacityBytes": canonical["device"]["capacityBytes"], "standard": canonical["method"]["name"],
@@ -574,7 +631,8 @@ def lookup_certificate(query: str) -> Optional[Dict[str, Any]]:
         "trustScoreLabel": ledger.get("trustScoreLabel"), "cleanedStatus": ledger.get("cleanedStatus"),
         "sha256Digest": hashlib.sha256(row["canonical"].encode()).hexdigest(),
         "signatureAlgorithm": "ECDSA P-256 / SHA-256", "canonicalPayload": row["canonical"],
-        "verdict": ("Signature valid and ledger record matches the signed content." if valid else
-                    ("Signature does not verify." if not sig_ok else
-                     "Ledger record was altered after signing: " + ", ".join(tampered_fields))),
+        "verdict": ("Signatures valid and ledger record matches the signed content." if valid else
+                    ("Workstation signature does not verify." if not sig_ok else
+                     "Ledger record was altered after signing: " + ", ".join(tampered_fields) if tampered_fields else
+                     "A personal signature (issuer or approver) does not verify.")),
     }

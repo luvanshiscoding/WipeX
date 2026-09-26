@@ -1,17 +1,20 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
+// Development: Vite serves the UI on :5173 and proxies /api to the backend on :8000.
+// Production / offline: `npm run build` writes dist/, which the backend serves itself.
 export default defineConfig({
-  plugins: [react()],
   server: {
     port: 5173,
-    host: true,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true
       }
     }
+  },
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+    emptyOutDir: true
   }
 })

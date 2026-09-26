@@ -1,40 +1,72 @@
 /**
- * WipeX frontend core: API client, job polling, formatting, icons, toasts,
- * modals, file picker and operator identity.
+ * WipeX frontend core: API client, session, job polling, formatting, icons,
+ * toasts, modals and the file picker.
  */
 
 // ── API ────────────────────────────────────────────────────────────────────
-const API_BASE = (() => {
-  const h = window.location.hostname;
-  // Vite proxies /api to the backend; when opened some other way fall back to the default port
-  return window.location.port === '5173' || window.location.port === '4173' ? '' : `http://${h || '127.0.0.1'}:8000`;
-})();
+// The backend serves the built UI itself and Vite proxies /api in development,
+// so requests are same-origin; only a page opened from disk needs an absolute URL.
+const API_BASE = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
 
 export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+// ── Session ────────────────────────────────────────────────────────────────
+const TOKEN_KEY = 'wipex_token';
+export const session = { token: '', user: null };
+try { session.token = sessionStorage.getItem(TOKEN_KEY) || ''; } catch { /* storage unavailable */ }
+let onSignedOut = null;
+
+export function setSession(token, user) {
+  session.token = token || '';
+  session.user = user || null;
+  try {
+    if (session.token) sessionStorage.setItem(TOKEN_KEY, session.token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* storage unavailable */ }
+  renderOperator();
+}
+
+export function onSessionEnded(fn) { onSignedOut = fn; }
+
+/** True when the signed-in user's role grants the permission (admin has '*'). */
+export function can(perm) {
+  const p = session.user?.permissions || [];
+  return p.includes('*') || p.includes(perm);
+}
+
 export async function api(path, { method = 'GET', body, raw = false } = {}) {
   let res;
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (session.token) headers.Authorization = `Bearer ${session.token}`;
   try {
     res = await fetch(API_BASE + path, {
-      method,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      method, headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: 'no-store',
     });
   } catch (e) {
-    throw new ApiError(0, 'Cannot reach the WipeX engine. Start it with: python -m uvicorn main:app --port 8000');
+    throw new ApiError(0, 'Cannot reach the WipeX engine. Start it with: python wipex.py');
   }
   if (!res.ok) {
     let detail = res.statusText;
     try { const j = await res.json(); detail = j.detail || detail; } catch { /* not json */ }
+    if (res.status === 401 && session.token && !path.startsWith('/api/auth/')) {
+      setSession('', null);
+      onSignedOut && onSignedOut();
+    }
     throw new ApiError(res.status, typeof detail === 'string' ? detail : JSON.stringify(detail));
   }
   return raw ? res : res.json();
 }
 
-export const apiUrl = (path) => API_BASE + path;
+/** URL for links and images (downloads cannot send headers, so the token rides in the query). */
+export function apiUrl(path) {
+  if (!session.token || !path.startsWith('/api/')) return API_BASE + path;
+  return `${API_BASE}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(session.token)}`;
+}
 
 /** Poll a background job until it finishes; onUpdate receives each snapshot. */
 export async function waitForJob(jobId, onUpdate, interval = 600) {
@@ -166,12 +198,19 @@ export function modal({ title, sub = '', body = '', actions = [], danger = false
 }
 
 /** Destructive confirmation: the user must type the confirmation word. */
-export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLabel = 'Erase', extra = '' }) {
+export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLabel = 'Erase', extra = '', approval = '' }) {
   return modal({
     title, sub, danger: true,
     body: `
       <dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
       ${extra}
+      ${approval ? `<div class="approval-box">
+        <div class="label">Approver ${approval === 'required' ? '(two-person rule: required)' : '(optional)'}</div>
+        <div class="hint">A second user with approval rights signs in here. Their approval is signed with their own key.</div>
+        <div class="grid cols-2" style="gap:10px;margin-top:8px">
+          <input class="input" id="ap-user" placeholder="Approver username" autocomplete="off">
+          <input class="input" id="ap-pass" type="password" placeholder="Approver password" autocomplete="off">
+        </div></div>` : ''}
       <div class="field">
         <label for="confirm-word">Type <b>${word}</b> to confirm</label>
         <input class="input mono" id="confirm-word" autocomplete="off" spellcheck="false">
@@ -184,38 +223,63 @@ export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLa
           toast(`Type ${word} to confirm`, 'bad');
           return false;
         }
-        return true;
+        if (!approval) return true;
+        const approver = bd.querySelector('#ap-user').value.trim();
+        const approverPassword = bd.querySelector('#ap-pass').value;
+        if (approval === 'required' && (!approver || !approverPassword)) {
+          toast('The two-person rule is on: the approver must sign in', 'bad');
+          return false;
+        }
+        return { approver, approverPassword };
       } },
     ],
   });
 }
 
-// ── Operator identity ──────────────────────────────────────────────────────
-const OP_KEY = 'wipex_operator';
-export function getOperator() {
-  try { return localStorage.getItem(OP_KEY) || ''; } catch { return ''; }
-}
+// ── Signed-in user ─────────────────────────────────────────────────────────
+export function getOperator() { return session.user?.username || ''; }
+
 export function renderOperator() {
-  const name = getOperator();
-  document.getElementById('operator-name').textContent = name || 'Set operator';
-  document.getElementById('operator-avatar').textContent = name ? name.split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() : '?';
+  const u = session.user;
+  const nameEl = document.getElementById('operator-name');
+  const avatarEl = document.getElementById('operator-avatar');
+  if (!nameEl || !avatarEl) return;
+  nameEl.textContent = u ? u.displayName : 'Not signed in';
+  nameEl.parentElement.title = u ? `${u.displayName} (${u.roleLabel}): account and sign out` : '';
+  avatarEl.textContent = u ? u.displayName.split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() : '?';
 }
-export async function askOperator(reason = '') {
-  const res = await modal({
-    title: 'Who is operating this workstation?',
-    sub: reason || 'Your name is recorded in the tamper-evident audit log for every action you take.',
-    body: `<div class="field"><label for="op-name">Operator name</label><input class="input" id="op-name" value="${esc(getOperator())}" placeholder="e.g. Insp. A. Sharma"></div>`,
-    actions: [{ label: 'Cancel', value: null }, { label: 'Save', cls: 'btn-primary', onClick: bd => bd.querySelector('#op-name').value.trim() || false }],
+
+/** Account menu: change password or sign out. */
+export async function askOperator() {
+  const u = session.user;
+  if (!u) return '';
+  const choice = await modal({
+    title: u.displayName,
+    sub: `${esc(u.username)} · ${esc(u.roleLabel)} · personal signing key <span class="mono">${esc(u.keyId)}</span>`,
+    body: `<p class="small" style="color:var(--text-2)">Actions you take are recorded in the audit log and signed with your personal key as well as the workstation key.</p>`,
+    actions: [{ label: 'Close', value: null }, { label: 'Change password', value: 'password' }, { label: 'Sign out', cls: 'btn-primary', value: 'out' }],
   });
-  if (res) {
-    try { localStorage.setItem(OP_KEY, res); } catch { /* storage unavailable */ }
-    renderOperator();
+  if (choice === 'out') {
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* already signed out */ }
+    setSession('', null);
+    onSignedOut && onSignedOut();
+  } else if (choice === 'password') {
+    const res = await modal({
+      title: 'Change password',
+      body: `
+        <div class="field"><label for="pw-old">Current password</label><input class="input" id="pw-old" type="password" autocomplete="current-password"></div>
+        <div class="field"><label for="pw-new">New password (8+ characters)</label><input class="input" id="pw-new" type="password" autocomplete="new-password"></div>`,
+      actions: [{ label: 'Cancel', value: null }, { label: 'Change', cls: 'btn-primary', onClick: bd => ({
+        oldPassword: bd.querySelector('#pw-old').value, newPassword: bd.querySelector('#pw-new').value }) }],
+    });
+    if (res) {
+      try { await api('/api/auth/password', { method: 'POST', body: res }); toast('Password changed', 'ok'); } catch (e) { reportError(e); }
+    }
   }
-  return res || getOperator();
+  return getOperator();
 }
-export async function requireOperator() {
-  return getOperator() || await askOperator('An operator name is required before erasing, acquiring evidence or changing a case.');
-}
+
+export async function requireOperator() { return getOperator(); }
 
 // ── File picker ────────────────────────────────────────────────────────────
 export function pickPaths({ title = 'Choose files or folders', start = '' } = {}) {

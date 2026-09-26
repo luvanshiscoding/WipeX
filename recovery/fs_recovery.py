@@ -13,7 +13,9 @@ import re
 import time
 from typing import Callable, Dict, List, Optional
 
-from .formats import validate_bytes
+import ewf
+
+from .formats import EXT_TO_FORMAT, validate_bytes
 
 try:
     import pytsk3
@@ -35,6 +37,28 @@ def _ts(v) -> Optional[str]:
 
 def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\-]+", "_", name)[:120] or "unnamed"
+
+
+if HAS_TSK:
+    class _EwfImg(pytsk3.Img_Info):
+        """Lets The Sleuth Kit read E01 images through WipeX's own EWF reader."""
+
+        def __init__(self, reader):
+            self._reader = reader
+            super().__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
+
+        def close(self):
+            self._reader.close()
+
+        def read(self, offset, size):
+            return self._reader.read(offset, size)
+
+        def get_size(self):
+            return self._reader.size
+
+
+def _open_img(path: str):
+    return _EwfImg(ewf.EwfReader(path)) if ewf.is_ewf(path) else pytsk3.Img_Info(path)
 
 
 def _open_filesystems(img) -> List[Dict[str, object]]:
@@ -85,13 +109,25 @@ def available() -> bool:
 
 
 def scan(source_path: str, out_dir: Optional[str] = None, extract_deleted: bool = True,
-         progress: Optional[ProgressFn] = None, max_entries: int = 50000, hash_live: bool = True) -> Dict[str, object]:
-    """List all entries; extract deleted files into out_dir when given."""
+         progress: Optional[ProgressFn] = None, max_entries: int = 50000, hash_live: bool = True,
+         start_path: str = "") -> Dict[str, object]:
+    """List all entries (or those under start_path); extract deleted files into out_dir when given."""
     if not HAS_TSK:
         return {"available": False, "reason": "pytsk3 (The Sleuth Kit) is not installed", "volumes": [], "entries": []}
+    img = _open_img(source_path)
+    try:
+        return _scan_img(img, source_path, out_dir, extract_deleted, progress, max_entries, hash_live, start_path)
+    finally:
+        try:
+            img.close()
+        except Exception:  # noqa: BLE001
+            pass
 
+
+def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bool,
+              progress: Optional[ProgressFn], max_entries: int, hash_live: bool,
+              start_path: str = "") -> Dict[str, object]:
     t0 = time.time()
-    img = pytsk3.Img_Info(source_path)
     volumes, entries = [], []
     fss = _open_filesystems(img)
     if not fss:
@@ -146,9 +182,13 @@ def scan(source_path: str, out_dir: Optional[str] = None, extract_deleted: bool 
                     except IOError:
                         pass
 
+        start = "/" + start_path.replace("\\", "/").strip("/") if start_path else "/"
         try:
-            walk(fs.open_dir(path="/"), "", 0)
+            walk(fs.open_dir(path=start), start.rstrip("/"), 0)
         except IOError:
+            if start_path:
+                return {"available": True, "volumes": volumes, "entries": [],
+                        "reason": f"Folder {start} was not found on this volume"}
             continue
 
     deleted = [e for e in entries if e["deleted"] and not e["isDir"]]
@@ -172,6 +212,11 @@ def _extract(entry, rec: Dict[str, object], out_dir: str) -> None:
         rec["contentStatus"] = "unreadable"
         rec["detail"] = str(exc)
         return
+    if data and not data.strip(b"\x00"):
+        # Nothing left to recover: SSDs and virtual disks erase freed blocks themselves (TRIM)
+        rec["contentStatus"] = "zeroed"
+        rec["detail"] = "The file's data blocks now read as zeros: the drive erased them (TRIM) or they were wiped"
+        return
     os.makedirs(out_dir, exist_ok=True)
     fname = f"F{rec['inode']}_{_safe_name(str(rec['name']))}"
     path = os.path.join(out_dir, fname)
@@ -180,11 +225,56 @@ def _extract(entry, rec: Dict[str, object], out_dir: str) -> None:
     rec["recoveredPath"] = path
     rec["sha256"] = hashlib.sha256(data).hexdigest()
     check = validate_bytes(data, str(rec["name"]))
-    if check is None:
-        # Unknown format: cannot prove integrity, but an all-zero body means the clusters were wiped
-        rec["contentStatus"] = "overwritten" if not data.strip(b"\x00") else "unverified"
+    ext = str(rec["name"]).rsplit(".", 1)[-1].lower() if "." in str(rec["name"]) else ""
+    if check is None and ext in EXT_TO_FORMAT:
+        # A known file type whose blocks no longer start like that type: the space was reused
+        rec["contentStatus"] = "overwritten"
+        rec["detail"] = "The file's space now holds other data"
+    elif check is None:
+        # Text and other formats without a structure to check: content may or may not be original
+        rec["contentStatus"] = "unverified"
     elif check.valid and check.end == len(data):
         rec["contentStatus"] = "intact"
     else:
         rec["contentStatus"] = "damaged"
         rec["detail"] = check.reason or "structure does not match the recorded size"
+
+
+def dir_traces(device: str, dir_path: str, names: List[str], hashes: set, max_bytes: int = 64 * 1024 * 1024) -> Dict[str, object]:
+    """
+    Read one directory straight from the volume (live and deleted entries) and report whether any
+    of the given file names, or any deleted entry whose content hashes to one of the given SHA-256
+    values, can still be found. Used to verify a file erasure from the forensic side.
+    """
+    if not HAS_TSK:
+        return {"checked": False, "reason": "The Sleuth Kit (pytsk3) is not installed"}
+    wanted = {n.lower() for n in names}
+    img = _open_img(device)
+    try:
+        fs = pytsk3.FS_Info(img, offset=0)
+        directory = fs.open_dir(path=dir_path or "/")
+        name_hits, content_hits, entries = [], [], 0
+        for entry in directory:
+            name = entry.info.name.name.decode("utf-8", "replace")
+            if name in (".", ".."):
+                continue
+            entries += 1
+            if name.lower() in wanted:
+                name_hits.append(name)
+            meta = entry.info.meta
+            deleted = bool(int(entry.info.name.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC))
+            if deleted and meta is not None and hashes and 0 < int(meta.size) <= max_bytes:
+                try:
+                    data = entry.read_random(0, int(meta.size))
+                except IOError:
+                    continue
+                if hashlib.sha256(data).hexdigest() in hashes:
+                    content_hits.append(name)
+        return {"checked": True, "entries": entries, "namesFound": name_hits, "contentFound": content_hits}
+    except IOError as exc:
+        return {"checked": False, "reason": f"Could not read the directory from the volume: {exc}"}
+    finally:
+        try:
+            img.close()
+        except Exception:  # noqa: BLE001
+            pass

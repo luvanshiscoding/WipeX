@@ -1,5 +1,5 @@
 /** Cases: evidence acquisition with hashes, legal holds (evidence lock), chain of custody. */
-import { ago, api, badge, bytes, esc, getOperator, icon, modal, pickPaths, progressBlock, reportError,
+import { ago, api, badge, bytes, can, esc, icon, modal, pickPaths, progressBlock, reportError,
   requireOperator, short, statusBadge, toast, waitForJob, when } from '../core.js';
 import { actionLabel } from './overview.js';
 
@@ -30,7 +30,7 @@ function render() {
         <h1 class="page-title">Cases</h1>
         <p class="page-desc">Keep evidence, legal holds and custody records together. A device or folder under an active hold cannot be erased by any module.</p>
       </div>
-      <button class="btn btn-primary" id="cs-new">${icon('plus', 16)} New case</button>
+      ${can('case.manage') ? `<button class="btn btn-primary" id="cs-new">${icon('plus', 16)} New case</button>` : ''}
     </div>
     <div class="grid cols-list">
       <div class="stack">
@@ -42,27 +42,21 @@ function render() {
             </tr>`).join('')}</tbody></table></div>`
           : '<div class="empty"><strong>No cases yet</strong>Create a case to acquire evidence and place legal holds.</div>'}
         </div>
-        <div class="card card-pad stack" style="gap:10px">
+        <div class="card card-pad stack" style="gap:6px">
           <div class="card-title">Erasure authorization</div>
-          <label class="check"><input type="checkbox" id="cs-dual" ${S.dual ? 'checked' : ''}>
-            <span>Two-person rule<span class="hint">Every erasure (M1 and M2) must name an approver who is not the operator.</span></span></label>
+          <div class="small">Two-person rule: ${S.dual ? badge('On', 'warn') : badge('Off')}</div>
+          <div class="muted small">When on, every erasure needs a second user (investigator or administrator) to sign in and approve it.${can('settings.manage') ? ' Change it in <a href="#/settings">Users &amp; Settings</a>.' : ''}</div>
         </div>
       </div>
       <div>${S.detail ? detailHtml(S.detail) : '<div class="card"><div class="empty">Select or create a case.</div></div>'}</div>
     </div>`;
 
-  root.querySelector('#cs-new').addEventListener('click', newCase);
+  root.querySelector('#cs-new')?.addEventListener('click', newCase);
   root.querySelectorAll('[data-case]').forEach(r => r.addEventListener('click', async () => {
     S.current = r.dataset.case;
     S.detail = await api(`/api/cases/${S.current}`).catch(() => null);
     render();
   }));
-  root.querySelector('#cs-dual').addEventListener('change', async (e) => {
-    try {
-      await api('/api/settings/dual-approval', { method: 'POST', body: { enabled: e.target.checked, actor: getOperator() || 'system' } });
-      toast(`Two-person rule ${e.target.checked ? 'enabled' : 'disabled'}`, 'ok');
-    } catch (err) { reportError(err); }
-  });
   if (S.detail) bindDetail();
 }
 
@@ -75,7 +69,7 @@ function detailHtml(c) {
         <div><div class="card-title" style="font-size:17px">${esc(c.title)}</div>
           <div class="card-sub">${esc(c.id)} · Investigator ${esc(c.investigator)} · opened ${esc(when(c.created_at))}</div>
           ${c.description ? `<div class="small" style="margin-top:6px;color:var(--text-2)">${esc(c.description)}</div>` : ''}</div>
-        <div class="row">${statusBadge(c.status)}<button class="btn btn-secondary btn-sm" id="cs-status">${c.status === 'OPEN' ? 'Close case' : 'Reopen'}</button></div>
+        <div class="row">${statusBadge(c.status)}${can('case.manage') ? `<button class="btn btn-secondary btn-sm" id="cs-status">${c.status === 'OPEN' ? 'Close case' : 'Reopen'}</button>` : ''}</div>
       </div>
       <div class="tabs" style="border-radius:0">${tabs.map(([k, l, n]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${l}<span class="count">${n}</span></button>`).join('')}</div>
       <div>${({ evidence: evidenceTab, holds: holdsTab, custody: custodyTab, jobs: jobsTab })[S.tab](c)}</div>
@@ -86,17 +80,17 @@ function evidenceTab(c) {
   return `
     <div class="card-body stack">
       <div class="row between"><span class="muted small">Images are copied into the case folder; SHA-256 and MD5 are computed during the copy and re-checked afterwards.</span>
-        <button class="btn btn-primary btn-sm" id="ev-acquire" ${c.status !== 'OPEN' ? 'disabled' : ''}>${icon('plus', 14)} Acquire evidence</button></div>
+        ${can('evidence.acquire') ? `<button class="btn btn-primary btn-sm" id="ev-acquire" ${c.status !== 'OPEN' ? 'disabled' : ''}>${icon('plus', 14)} Acquire evidence</button>` : ''}</div>
       ${S.acquiring ? progressBlock(S.acquiring.progress, S.acquiring.message) : ''}
       ${c.evidence.length ? `<div class="table-wrap" style="border:1px solid var(--border);border-radius:6px"><table class="table">
         <thead><tr><th>Item</th><th class="num">Size</th><th>SHA-256</th><th>Acquired</th><th></th></tr></thead><tbody>
         ${c.evidence.map(e => `<tr>
-          <td><b class="mono">${esc(e.id)}</b> · ${esc(e.label)}<div class="muted small mono trunc" style="max-width:260px" title="${esc(e.source_path)}">${esc(e.source_path)}</div></td>
+          <td><b class="mono">${esc(e.id)}</b> · ${esc(e.label)} ${/E01/.test(e.kind) ? badge('E01', 'blue') : badge('raw')}<div class="muted small mono trunc" style="max-width:260px" title="${esc(e.source_path)}">${esc(e.source_path)}</div></td>
           <td class="num">${bytes(e.size_bytes)}</td>
           <td class="mono" title="${esc(e.sha256)}">${short(e.sha256, 14)}</td>
           <td class="small nowrap">${esc(when(e.acquired_at))}<div class="muted">${esc(e.acquired_by)}</div></td>
           <td class="nowrap"><button class="btn btn-ghost btn-sm" data-verify="${e.id}">Verify hash</button>
-            <a class="btn btn-ghost btn-sm" href="#/recovery?evidence=${e.id}">Recover</a></td></tr>`).join('')}
+            ${can('recovery.run') ? `<a class="btn btn-ghost btn-sm" href="#/recovery?evidence=${e.id}">Recover</a>` : ''}</td></tr>`).join('')}
         </tbody></table></div>` : '<div class="empty">No evidence acquired for this case.</div>'}
     </div>`;
 }
@@ -105,14 +99,14 @@ function holdsTab(c) {
   return `
     <div class="card-body stack">
       <div class="row between"><span class="muted small">While a hold is active, WipeX refuses to erase the matching device or any path inside the held folder.</span>
-        <button class="btn btn-primary btn-sm" id="hd-add">${icon('hold', 14)} Place hold</button></div>
+        ${can('hold.manage') ? `<button class="btn btn-primary btn-sm" id="hd-add">${icon('hold', 14)} Place hold</button>` : ''}</div>
       ${c.holds.length ? `<div class="table-wrap" style="border:1px solid var(--border);border-radius:6px"><table class="table">
         <thead><tr><th>Hold</th><th>Target</th><th>Reason</th><th>Placed</th><th>Status</th><th></th></tr></thead><tbody>
         ${c.holds.map(h => `<tr><td class="mono">${esc(h.id)}</td>
           <td><div class="small muted">${esc({ device_serial: 'Device serial', device_path: 'Device / image path', path: 'Folder or file' }[h.target_kind])}</div><div class="mono small trunc" title="${esc(h.target)}">${esc(h.target)}</div></td>
           <td class="small">${esc(h.reason || '—')}</td><td class="small nowrap">${esc(when(h.created_at))}</td>
           <td>${h.active ? badge('Active', 'bad') : badge(`Released ${when(h.released_at)}`)}</td>
-          <td>${h.active ? `<button class="btn btn-ghost btn-sm" data-release="${h.id}">Release</button>` : ''}</td></tr>`).join('')}
+          <td>${h.active && can('hold.manage') ? `<button class="btn btn-ghost btn-sm" data-release="${h.id}">Release</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>` : '<div class="empty">No legal holds on this case.</div>'}
     </div>`;
 }
@@ -143,7 +137,7 @@ function bindDetail() {
   root.querySelectorAll('[data-verify]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Hashing…';
     try {
-      const r = await api(`/api/evidence/${b.dataset.verify}/verify`, { method: 'POST', body: { actor: getOperator() || 'system' } });
+      const r = await api(`/api/evidence/${b.dataset.verify}/verify`, { method: 'POST' });
       toast(r.match ? 'Hash matches the acquisition record' : 'HASH MISMATCH — evidence has changed', r.match ? 'ok' : 'bad');
       await refresh();
     } catch (e) { reportError(e); }
@@ -161,12 +155,11 @@ async function newCase() {
     title: 'New case',
     body: `
       <div class="field"><label>Title</label><input class="input" id="nc-title" placeholder="e.g. Seized laptop — FIR 118/2026"></div>
-      <div class="field"><label>Investigator</label><input class="input" id="nc-inv" value="${esc(getOperator())}"></div>
       <div class="field"><label>Description</label><textarea class="textarea" id="nc-desc" placeholder="Optional"></textarea></div>`,
     actions: [{ label: 'Cancel', value: null }, { label: 'Create case', cls: 'btn-primary', onClick: bd => {
-      const title = bd.querySelector('#nc-title').value.trim(), inv = bd.querySelector('#nc-inv').value.trim();
-      if (!title || !inv) { toast('Title and investigator are required', 'bad'); return false; }
-      return { title, investigator: inv, description: bd.querySelector('#nc-desc').value };
+      const title = bd.querySelector('#nc-title').value.trim();
+      if (!title) { toast('A case title is required', 'bad'); return false; }
+      return { title, description: bd.querySelector('#nc-desc').value };
     } }],
   });
   if (!res) return;
@@ -193,18 +186,22 @@ async function acquire() {
   if (!actor) return;
   const res = await modal({
     title: 'Acquire evidence',
-    sub: 'The source is read once, copied into the case folder and hashed (SHA-256 + MD5). The copy is re-hashed to prove it is identical.',
+    sub: 'The source (disk image, E01 or device) is read once, stored in the case folder and hashed (SHA-256 + MD5). The stored image is read back and re-hashed to prove it is identical.',
     body: `
       <div class="field"><label>Source</label>
         <select class="select" id="aq-kind"><option value="lab">Lab disk image</option><option value="path">Image file or device path</option></select></div>
       <div class="field" id="aq-lab-f"><label>Lab image</label><select class="select" id="aq-lab">${S.images.map(i => `<option value="${i.id}">${esc(i.model)}</option>`).join('')}</select></div>
       <div class="field hidden" id="aq-path-f"><label>Path</label><div class="row"><input class="input mono" id="aq-path" placeholder="D:\\evidence\\usb.dd or \\\\.\\PhysicalDrive1" style="flex:1"><button class="btn btn-secondary btn-sm" id="aq-browse">Browse</button></div>
         <span class="hint">Physical devices need administrator rights.</span></div>
-      <div class="field"><label>Label</label><input class="input" id="aq-label" placeholder="e.g. Suspect USB stick"></div>`,
+      <div class="field"><label>Label</label><input class="input" id="aq-label" placeholder="e.g. Suspect USB stick"></div>
+      <div class="field"><label>Image format</label><select class="select" id="aq-fmt">
+        <option value="e01">E01 (Expert Witness, compressed, case metadata and MD5/SHA-1 inside)</option>
+        <option value="raw">Raw (.dd, bit-for-bit copy)</option></select></div>`,
     actions: [{ label: 'Cancel', value: null }, { label: 'Acquire', cls: 'btn-primary', onClick: bd => {
       const kind = bd.querySelector('#aq-kind').value;
-      return kind === 'lab' ? { labImageId: bd.querySelector('#aq-lab').value, label: bd.querySelector('#aq-label').value }
-        : { sourcePath: bd.querySelector('#aq-path').value.trim(), label: bd.querySelector('#aq-label').value };
+      const format = bd.querySelector('#aq-fmt').value;
+      return kind === 'lab' ? { labImageId: bd.querySelector('#aq-lab').value, label: bd.querySelector('#aq-label').value, format }
+        : { sourcePath: bd.querySelector('#aq-path').value.trim(), label: bd.querySelector('#aq-label').value, format };
     } }],
     onMount: (bd) => {
       const sync = () => { const lab = bd.querySelector('#aq-kind').value === 'lab'; bd.querySelector('#aq-lab-f').classList.toggle('hidden', !lab); bd.querySelector('#aq-path-f').classList.toggle('hidden', lab); };

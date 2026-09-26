@@ -61,7 +61,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .nav::-webkit-scrollbar { display: none; }
 .nav a {
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
-  height: 56px; padding: 0 12px; color: #bcd4d1; text-decoration: none; font-size: 13.5px; font-weight: 500;
+  height: 56px; padding: 0 10px; color: #bcd4d1; text-decoration: none; font-size: 13.5px; font-weight: 500;
   border-bottom: 2px solid transparent;
 }
 .nav a:hover { color: #fff; background: rgba(255,255,255,.05); }
@@ -360,3 +360,43 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
   .topbar, .no-print { display: none !important; }
   body { background: #fff; }
 }
+
+/* ─── Sign-in, approvals, users ───────────────────────────────────────── */
+
+body.signed-out .topbar .nav, body.signed-out .topbar .top-right, body.signed-out .page { visibility: hidden; }
+.auth-wrap { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: linear-gradient(180deg, var(--ink) 0 38%, var(--bg) 38% 100%); overflow-y: auto; }
+.auth-card { width: min(400px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg); padding: 28px 28px 22px; display: flex; flex-direction: column; gap: 14px; }
+.auth-brand { color: var(--text); }
+.auth-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.auth-sub { font-size: 13px; color: var(--text-2); margin-top: -6px; }
+.auth-error { min-height: 18px; font-size: 13px; color: var(--bad); }
+.auth-card .btn { width: 100%; justify-content: center; }
+.auth-foot { text-align: center; }
+.approval-box { border: 1px dashed var(--warn-line); background: var(--warn-soft); border-radius: var(--r-md); padding: 10px 12px; margin: 12px 0; }
+.approval-box .label { font-weight: 600; font-size: 13px; }
+.approval-box .hint { font-size: 12px; color: var(--text-2); }
+.key-block { font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-all; background: var(--sunken);
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; max-height: 180px; overflow: auto; }
+@media (max-width: 520px) { .auth-card { padding: 22px 18px 18px; } }
+
+/* ─── Collapsible details and choice cards ───────────────────────────── */
+
+details.more { border-top: 1px solid var(--border); }
+details.more > summary { list-style: none; cursor: pointer; padding: 12px 20px; font-size: 13px; font-weight: 600; color: var(--text-2); display: flex; align-items: center; gap: 8px; user-select: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s; margin-right: 2px; }
+details.more[open] > summary::before { transform: rotate(45deg); }
+details.more > summary:hover { color: var(--text); }
+.more-body { padding: 0 20px 16px; }
+details.more.card-like { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); margin-top: 12px; box-shadow: var(--shadow); }
+details.more.card-like > .more-body { padding-top: 4px; }
+.choice-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.choice { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px 12px 38px; cursor: pointer; position: relative; background: var(--surface); }
+.choice input { position: absolute; left: 14px; top: 15px; accent-color: var(--primary); }
+.choice b { font-size: 14px; }
+.choice span { font-size: 12.5px; color: var(--text-2); }
+.choice.on { border-color: var(--primary); background: var(--primary-soft); }
+.verdict-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.verdict-list div { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }

@@ -1,6 +1,7 @@
 """
-WipeX - SQLite storage for forensic workflow tables (cases, evidence, legal holds,
-audit log, background jobs, settings). Shares wipex.db with database.py.
+WipeX - SQLite storage (single file, works offline). Holds the forensic workflow
+tables (cases, evidence, legal holds, audit log, jobs, settings, users); database.py
+keeps the erasure and certificate tables in the same file.
 """
 
 import json
@@ -10,8 +11,10 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-DB_FILE = os.environ.get("WIPEX_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "wipex.db"))
-WORKSPACE = os.environ.get("WIPEX_WORKSPACE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace"))
+import paths
+
+DB_FILE = os.environ.get("WIPEX_DB", os.path.join(paths.data_dir(), "wipex.db"))
+WORKSPACE = os.environ.get("WIPEX_WORKSPACE", os.path.join(paths.data_dir(), "workspace"))
 
 _lock = threading.RLock()
 _initialized_for: Optional[str] = None

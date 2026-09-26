@@ -7,10 +7,23 @@ import os
 import time
 from typing import Callable, Dict, List, Optional
 
+import ewf
+
 from . import carver, fs_recovery
 from .formats import FORMATS
 
 ProgressFn = Callable[[int, str], None]
+
+
+def _source_size(path: str) -> int:
+    try:
+        img = ewf.open_image(path)
+        try:
+            return img.size
+        finally:
+            img.close()
+    except OSError:
+        return 0
 
 
 def supported_formats() -> List[Dict[str, str]]:
@@ -19,7 +32,7 @@ def supported_formats() -> List[Dict[str, str]]:
 
 def scan(source_path: str, out_dir: str, use_fs: bool = True, use_carving: bool = True,
          types: Optional[List[str]] = None, include_partial: bool = False,
-         progress: Optional[ProgressFn] = None) -> Dict[str, object]:
+         progress: Optional[ProgressFn] = None, start_path: str = "") -> Dict[str, object]:
     """Run file-system recovery then carving; merge results and de-duplicate by hash."""
     if not os.path.exists(source_path) and not source_path.startswith("\\\\.\\"):
         raise FileNotFoundError(f"Source not found: {source_path}")
@@ -31,7 +44,10 @@ def scan(source_path: str, out_dir: str, use_fs: bool = True, use_carving: bool 
         return (lambda p, m: progress(lo + p * (hi - lo) // 100, m)) if progress else None
 
     if use_fs:
-        fs_result = fs_recovery.scan(source_path, os.path.join(out_dir, "filesystem"), progress=sub(0, 40))
+        size = _source_size(source_path)
+        # Hashing live files only helps to label carved duplicates; skip it on whole drives
+        fs_result = fs_recovery.scan(source_path, os.path.join(out_dir, "filesystem"), progress=sub(0, 40 if use_carving else 100),
+                                     hash_live=size <= 4 * 1024 ** 3, start_path=start_path)
     if use_carving:
         carve_result = carver.carve(source_path, os.path.join(out_dir, "carved"), types=types,
                                     include_partial=include_partial, progress=sub(40 if use_fs else 0, 100))

@@ -1,9 +1,9 @@
 /** M1 — Drive Eraser: device → method → erase & verify → certificate. */
 import qrcode from 'qrcode-generator';
-import { api, apiUrl, askOperator, badge, bytes, checksList, confirmDanger, esc, getOperator, icon, modal, progressBlock,
-  reportError, requireOperator, sleep, statusBadge, toast, when } from '../core.js';
+import { api, apiUrl, badge, bytes, checksList, confirmDanger, esc, getOperator, icon, modal, progressBlock,
+  reportError, sleep, statusBadge, toast, when } from '../core.js';
 
-const S = { step: 1, devices: [], methods: [], selected: null, method: null, approver: '', wipeId: null, status: null, cert: null, loading: false };
+const S = { step: 1, devices: [], methods: [], selected: null, method: null, psid: '', wipeId: null, status: null, cert: null, loading: false };
 let root, appRef, pollToken = 0;
 
 export async function show(el, _params, app) {
@@ -29,8 +29,8 @@ function render() {
   root.innerHTML = `
     <div class="page-head">
       <div>
-        <h1 class="page-title">Drive Eraser <span class="code-tag">M1</span></h1>
-        <p class="page-desc">Sanitize an entire storage device following NIST SP 800-88, verify the result independently and issue a signed certificate.</p>
+        <h1 class="page-title">Erase a whole drive</h1>
+        <p class="page-desc">Wipe an entire disk or USB drive to NIST SP 800-88, prove that nothing can be recovered, and get a signed certificate.</p>
       </div>
     </div>
     ${stepper()}
@@ -40,7 +40,7 @@ function render() {
 }
 
 function stepper() {
-  const steps = ['Choose device', 'Choose method', 'Erase & verify', 'Certificate'];
+  const steps = ['Choose drive', 'Choose method', 'Erase and check', 'Certificate'];
   return `<div class="stepper">${steps.map((t, i) => {
     const n = i + 1;
     const cls = n === S.step ? 'on' : n < S.step ? 'done' : '';
@@ -58,7 +58,7 @@ function lockReason(d) {
 function deviceCard(d) {
   const locked = lockReason(d);
   const tags = [
-    d.isImage ? badge('Lab image', 'blue') : badge(d.interface || d.type || 'Disk'),
+    d.isImage ? badge('Sample disk', 'blue') : badge(d.interface || d.type || 'Disk'),
     d.isBootDrive ? badge('System disk', 'warn') : '',
     d.legalHold ? badge('Legal hold', 'bad') : '',
   ].join('');
@@ -79,18 +79,18 @@ function renderDevices(body) {
   body.innerHTML = `
     <div class="card">
       <div class="card-head">
-        <div><div class="card-title">Storage targets</div><div class="card-sub">Physical disks detected on this workstation, plus lab disk images for safe, real erasure runs.</div></div>
+        <div><div class="card-title">Which drive?</div><div class="card-sub">Drives connected to this computer, plus sample disks for safe practice.</div></div>
         <div class="row">
-          <button class="btn btn-secondary btn-sm" id="dv-new">${icon('plus', 14)} New lab image</button>
+          <button class="btn btn-secondary btn-sm" id="dv-new">${icon('plus', 14)} New sample disk</button>
           <button class="btn btn-secondary btn-sm" id="dv-scan">${icon('refresh', 14)} Rescan</button>
         </div>
       </div>
       <div class="card-body">
         ${S.loading ? '<div class="empty">Scanning devices…</div>' : `
-        <div class="section-label" style="margin-top:0">Physical devices</div>
+        <div class="section-label" style="margin-top:0">Drives on this computer</div>
         ${physical.length ? `<div class="pick-grid">${physical.map(deviceCard).join('')}</div>` : '<div class="muted small">No physical devices detected. Attach a USB drive and rescan (administrator rights are needed to erase it).</div>'}
-        <div class="section-label">Lab disk images</div>
-        ${images.length ? `<div class="pick-grid">${images.map(deviceCard).join('')}</div>` : '<div class="muted small">No lab images yet — create one to try a real erasure safely.</div>'}`}
+        <div class="section-label">Sample disks (safe to practise on)</div>
+        ${images.length ? `<div class="pick-grid">${images.map(deviceCard).join('')}</div>` : '<div class="muted small">No sample disks yet. Create one to try a real erasure safely.</div>'}`}
       </div>
     </div>
     ${d ? detailCard(d) : ''}
@@ -185,19 +185,23 @@ async function deleteImage() {
 }
 
 // ── Step 2: method ─────────────────────────────────────────────────────────
+/** Why a firmware method cannot run on this device from this OS ('' when it can). */
 function methodBlock(m, d) {
-  const hwAvailable = appRef.health?.capabilities?.hardwarePurge;
-  if (m.id === 'destroy') return '';
-  if (m.hardware && d.isImage) return 'Needs a physical NVMe/SATA device';
-  if (m.hardware && !hwAvailable) return 'Hardware sanitize commands run on Linux (nvme-cli / hdparm)';
-  return '';
+  if (!m.hardware || m.id === 'destroy') return '';
+  if (d.isImage) return 'Needs a physical NVMe/SATA device';
+  const caps = d.hardwareMethods || {};
+  if (caps[m.hardware]?.available) return '';
+  if (m.hardware === 'crypto' && caps.opal?.available) return '';
+  return caps[m.hardware]?.reason || 'Not available for this device on this operating system';
 }
 
+/** Opal drives without NVMe Sanitize are crypto-erased by PSID revert; the PSID is on the drive label. */
+const needsPsid = (d) => S.method === 'crypto_erase' && !d.isImage && !d.hardwareMethods?.crypto?.available && d.hardwareMethods?.opal?.available;
+
 function recommend(d) {
-  const hw = appRef.health?.capabilities?.hardwarePurge;
-  if (!d.isImage && hw && /nvme/i.test(d.type)) return 'crypto_erase';
-  if (!d.isImage && hw && /ssd/i.test(d.type)) return 'ata_sanitize';
-  return 'nist_800_88';
+  const rec = d.recommendedMethod;
+  const m = S.methods.find(x => x.id === rec);
+  return m && rec !== 'destroy' && !methodBlock(m, d) ? rec : 'nist_800_88';
 }
 
 const METHOD_NOTES = {
@@ -206,7 +210,8 @@ const METHOD_NOTES = {
   random_pass: 'One pass of keyed random data. Verification regenerates the exact stream, so random is fully checkable.',
   dod_5220_22_m: 'Zeros, ones, then keyed random. Legacy DoD pattern still requested by some policies.',
   gutmann: '35 passes designed for 1990s magnetic encodings. No benefit on modern drives; very slow.',
-  crypto_erase: 'Destroys the drive\'s media encryption key (NVMe Sanitize / TCG Opal). Seconds, covers spare blocks.',
+  crypto_erase: 'Destroys the drive\'s media encryption key (NVMe Sanitize, or TCG Opal PSID revert). Seconds, covers spare blocks.',
+  block_erase: 'NVMe Sanitize block erase: the controller erases every block, including spare and remapped areas.',
   ata_sanitize: 'Drive firmware erases all blocks including remapped and over-provisioned areas.',
 };
 
@@ -240,10 +245,11 @@ function renderMethods(body) {
         <div class="card">
           <div class="card-head"><span class="card-title">Authorization</span>${dual ? badge('Two-person rule on', 'warn') : ''}</div>
           <div class="card-body stack" style="gap:12px">
-            <div class="field"><label>Operator</label><div class="row"><b>${esc(getOperator() || 'Not set')}</b><button class="btn btn-ghost btn-sm" id="mt-op">Change</button></div></div>
-            <div class="field"><label for="mt-approver">Approver ${dual ? '(required)' : '(optional)'}</label>
-              <input class="input" id="mt-approver" value="${esc(S.approver)}" placeholder="Second person confirming this erasure">
-              <span class="hint">Recorded on the certificate and in the audit log.</span></div>
+            <div class="field"><label>Operator</label><b>${esc(getOperator())}</b><span class="hint">Signed in; recorded and signed with your personal key.</span></div>
+            <div class="field"><label>Approver</label><span class="small">${dual ? 'Required: a second user signs in when you confirm.' : 'Optional: a second user may sign in when you confirm.'}</span></div>
+            ${needsPsid(d) ? `<div class="field"><label for="mt-psid">Drive PSID (32 characters, printed on the label)</label>
+              <input class="input mono" id="mt-psid" value="${esc(S.psid)}" autocomplete="off" spellcheck="false">
+              <span class="hint">Used once for the TCG Opal PSID revert; never stored.</span></div>` : ''}
           </div>
         </div>
         <div class="notice">${icon('info', 16)}<div><strong>What happens next</strong>WipeX captures sample blocks${d.isImage ? ' and plants canary blocks' : ''}, runs the passes, reads the device back against the expected pattern, then tries to recover files from it with M3. The job only passes if nothing is recoverable.</div></div>
@@ -259,30 +265,31 @@ function renderMethods(body) {
     const blocked = methodBlock(m, d);
     if (blocked) { toast(blocked, 'bad'); return; }
     S.method = m.id;
-    S.approver = body.querySelector('#mt-approver').value;
     render();
   }));
-  body.querySelector('#mt-approver').addEventListener('input', e => { S.approver = e.target.value; });
-  body.querySelector('#mt-op').addEventListener('click', async () => { await askOperator(); render(); });
+  body.querySelector('#mt-psid')?.addEventListener('input', e => { S.psid = e.target.value; });
   body.querySelector('#mt-back').addEventListener('click', () => { S.step = 1; render(); });
   body.querySelector('#mt-start').addEventListener('click', startErasure);
 }
 
 async function startErasure() {
   const d = S.selected;
-  const operator = await requireOperator();
-  if (!operator) return;
+  const operator = getOperator();
   const m = S.methods.find(x => x.id === S.method);
+  if (needsPsid(d) && S.psid.replace(/[^A-Za-z0-9]/g, '').length !== 32) { toast('Enter the 32-character PSID from the drive label', 'bad'); return; }
   const ok = await confirmDanger({
     title: `Erase ${d.model}?`,
     sub: 'Every byte on this device will be overwritten. This cannot be undone.',
     rows: [['Device', esc(d.model)], ['Path', `<span class="mono">${esc(d.devicePath)}</span>`], ['Serial', `<span class="mono">${esc(d.serialNumber)}</span>`],
-           ['Method', esc(m.name)], ['Operator', esc(operator)], ['Approver', esc(S.approver || '—')]],
+           ['Method', esc(m.name)], ['Operator', esc(operator)]],
     confirmLabel: 'Erase device',
+    approval: appRef.health?.dualApproval ? 'required' : '',
   });
   if (!ok) return;
   try {
-    const res = await api('/api/wipe/start', { method: 'POST', body: { deviceId: d.id, methodId: S.method, operator, approver: S.approver } });
+    const res = await api('/api/wipe/start', { method: 'POST', body: {
+      deviceId: d.id, methodId: S.method, psid: needsPsid(d) ? S.psid : '', approver: ok.approver || '', approverPassword: ok.approverPassword || '' } });
+    S.psid = '';
     S.wipeId = res.wipeId;
     S.status = null;
     S.cert = null;
@@ -353,14 +360,14 @@ function renderRun(body) {
 
 async function issueCertificate() {
   try {
-    S.cert = await api('/api/certificates/generate', { method: 'POST', body: { wipeId: S.wipeId, actor: getOperator() || 'system' } });
+    S.cert = await api('/api/certificates/generate', { method: 'POST', body: { wipeId: S.wipeId } });
     S.step = 4;
     render();
   } catch (e) { reportError(e); }
 }
 
 function resetFlow() {
-  S.step = 1; S.wipeId = null; S.status = null; S.cert = null; S.method = null; S.approver = '';
+  S.step = 1; S.wipeId = null; S.status = null; S.cert = null; S.method = null; S.psid = '';
   loadDevices().then(render);
 }
 
@@ -371,6 +378,8 @@ export function qrSvg(text) {
   qr.make();
   return qr.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
 }
+
+const sigBadge = (s) => s ? ` ${s.valid ? badge('signed', 'ok') : badge('signature invalid', 'bad')}` : '';
 
 export function certificateHtml(c) {
   const ok = c.trustScore === 'GREEN';
@@ -394,7 +403,8 @@ export function certificateHtml(c) {
         </dl>
         <dl class="kv">
           <dt>Method</dt><dd>${esc(c.standard)}</dd><dt>NIST category</dt><dd>${esc(c.category)}</dd>
-          <dt>Operator</dt><dd>${esc(c.operator || '—')}</dd><dt>Approver</dt><dd>${esc(c.approver || '—')}</dd>
+          <dt>Operator</dt><dd>${esc(c.operator || '—')}${sigBadge(c.issuerSignature)}</dd>
+          <dt>Approver</dt><dd>${esc(c.approver || '—')}${sigBadge(c.approvalSignature)}</dd>
         </dl>
       </div>
       <div class="section-label">Verification</div>

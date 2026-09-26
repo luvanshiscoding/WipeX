@@ -20,6 +20,8 @@ import zlib
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
+import ewf
+
 from .formats import FORMATS, Format, ParseResult, parse_png, parse_zip
 
 ProgressFn = Callable[[int, str], None]
@@ -43,28 +45,18 @@ class CarvedFile:
 
 
 class Source:
-    """Read-only random access over an image file or raw device."""
+    """Read-only random access over a raw image, raw device or E01 image."""
 
     def __init__(self, path: str):
         self.path = path
-        self.f = open(path, "rb", buffering=0)
-        self.size = self.f.seek(0, os.SEEK_END)
-        self.f.seek(0)
+        self._img = ewf.open_image(path)
+        self.size = self._img.size
 
     def read(self, offset: int, length: int) -> bytes:
-        if offset >= self.size:
-            return b""
-        length = min(length, self.size - offset)
-        # Raw devices on Windows need sector-aligned reads
-        start = offset - (offset % 512)
-        end = offset + length
-        end_aligned = min(self.size, end + (-end % 512))
-        self.f.seek(start)
-        buf = self.f.read(end_aligned - start)
-        return buf[offset - start:offset - start + length]
+        return self._img.read(offset, length)
 
     def close(self):
-        self.f.close()
+        self._img.close()
 
 
 def detect_cluster_size(src: "Source", default: int = 4096) -> int:

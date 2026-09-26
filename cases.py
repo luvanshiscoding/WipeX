@@ -9,11 +9,11 @@ Every change is written to the tamper-evident audit log.
 import hashlib
 import os
 import secrets
-import shutil
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 import audit_log
+import ewf
 import store
 
 
@@ -70,30 +70,44 @@ def set_case_status(case_id: str, status: str, actor: str) -> None:
 # ── Evidence acquisition ─────────────────────────────────────────────────────
 
 def acquire_evidence(case_id: str, source_path: str, label: str, actor: str,
-                     progress: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
+                     progress: Optional[Callable[[int, str], None]] = None, fmt: str = "raw") -> Dict[str, Any]:
     """
-    Forensic acquisition: copy the source (file image or raw device, opened read-only)
-    into the case folder while computing SHA-256 and MD5 in one pass, then re-hash the
-    copy to confirm it matches. Returns the evidence record.
+    Forensic acquisition: read the source (raw image, raw device or E01, opened read-only)
+    and write it into the case folder as a raw .dd or an E01 image, computing SHA-256 and
+    MD5 of the media in the same pass. The stored image is then read back and re-hashed;
+    acquisition fails unless the hashes match. Returns the evidence record.
     """
     if not store.query_one("SELECT id FROM cases WHERE id=?", (case_id,)):
         raise ValueError(f"Unknown case {case_id}")
     if not source_path:
         raise ValueError("Source path is required")
+    if fmt not in ("raw", "e01"):
+        raise ValueError("Format must be raw or e01")
 
     evidence_id = f"EV-{secrets.token_hex(4).upper()}"
     dest_dir = store.workspace_path("cases", case_id, "evidence")
-    dest = os.path.join(dest_dir, f"{evidence_id}.dd")
     audit_log.append("evidence.acquisition_started", actor, target=source_path, case_id=case_id,
-                     details={"evidenceId": evidence_id, "label": label})
+                     details={"evidenceId": evidence_id, "label": label, "format": fmt})
 
-    total = _source_size(source_path)
+    src = ewf.open_image(source_path)
+    source_format = "e01" if isinstance(src, ewf.EwfReader) else "raw"
+    total = src.size
     sha, md5 = hashlib.sha256(), hashlib.md5()
     copied = 0
     chunk = 4 * 1024 * 1024
-    with open(source_path, "rb", buffering=0) as src, open(dest, "wb") as out:
-        while True:
-            block = src.read(chunk)
+    notes = ""
+    try:
+        if fmt == "e01":
+            dest_base = os.path.join(dest_dir, evidence_id)
+            out = ewf.EwfWriter(dest_base, total, {"case_number": case_id, "evidence_number": evidence_id,
+                                                   "description": label, "examiner_name": actor,
+                                                   "notes": f"Source: {source_path}"})
+            dest = ewf.segment_name(dest_base, 1)
+        else:
+            dest = os.path.join(dest_dir, f"{evidence_id}.dd")
+            out = open(dest, "wb")
+        while copied < total:
+            block = src.read(copied, min(chunk, total - copied))
             if not block:
                 break
             sha.update(block)
@@ -101,15 +115,30 @@ def acquire_evidence(case_id: str, source_path: str, label: str, actor: str,
             out.write(block)
             copied += len(block)
             if progress and total:
-                progress(min(95, int(copied * 95 / total)), f"Imaged {copied // (1024 * 1024)} MB")
+                progress(min(90, int(copied * 90 / total)), f"Imaged {copied // (1024 * 1024)} MB")
+        info = out.close() if fmt == "e01" else (out.close() or {})
+        if fmt == "e01" and total % 512:
+            notes = f"Media padded from {total} to {info['mediaSize']} bytes (whole sectors) inside the E01"
+        if source_format == "e01" and src.stored_md5 and src.stored_md5 != md5.hexdigest():
+            notes = (notes + "; " if notes else "") + "Source E01 stored MD5 does not match its content"
+    finally:
+        src.close()
     source_sha = sha.hexdigest()
 
     if progress:
-        progress(97, "Verifying image hash")
-    verify = hashlib.sha256()
-    with open(dest, "rb") as f:
-        for block in iter(lambda: f.read(chunk), b""):
+        progress(92, "Reading the stored image back to verify its hash")
+    check = ewf.open_image(dest)
+    try:
+        verify = hashlib.sha256()
+        pos = 0
+        while pos < copied:
+            block = check.read(pos, min(chunk, copied - pos))
+            if not block:
+                break
             verify.update(block)
+            pos += len(block)
+    finally:
+        check.close()
     if verify.hexdigest() != source_sha:
         audit_log.append("evidence.acquisition_failed", actor, target=source_path, case_id=case_id,
                          details={"evidenceId": evidence_id, "reason": "hash mismatch after copy"})
@@ -117,9 +146,10 @@ def acquire_evidence(case_id: str, source_path: str, label: str, actor: str,
 
     record = {
         "id": evidence_id, "case_id": case_id, "label": label or os.path.basename(source_path),
-        "source_path": source_path, "image_path": dest, "kind": "device" if _is_device(source_path) else "image",
+        "source_path": source_path, "image_path": dest,
+        "kind": ("device" if _is_device(source_path) else "image") + (" (E01)" if fmt == "e01" else ""),
         "size_bytes": copied, "sha256": source_sha, "md5": md5.hexdigest(),
-        "acquired_at": _now(), "acquired_by": actor, "notes": "",
+        "acquired_at": _now(), "acquired_by": actor, "notes": notes,
     }
     with store.tx() as conn:
         conn.execute(
@@ -140,9 +170,17 @@ def verify_evidence(evidence_id: str, actor: str) -> Dict[str, Any]:
     if not ev:
         raise ValueError("Unknown evidence item")
     sha = hashlib.sha256()
-    with open(ev["image_path"], "rb") as f:
-        for block in iter(lambda: f.read(4 * 1024 * 1024), b""):
+    img = ewf.open_image(ev["image_path"])
+    try:
+        pos, total = 0, int(ev["size_bytes"] or img.size)
+        while pos < total:
+            block = img.read(pos, min(4 * 1024 * 1024, total - pos))
+            if not block:
+                break
             sha.update(block)
+            pos += len(block)
+    finally:
+        img.close()
     ok = sha.hexdigest() == ev["sha256"]
     audit_log.append("evidence.hash_verified" if ok else "evidence.hash_mismatch", actor,
                      target=evidence_id, case_id=ev["case_id"], details={"sha256": sha.hexdigest()})
@@ -151,16 +189,6 @@ def verify_evidence(evidence_id: str, actor: str) -> Dict[str, Any]:
 
 def _is_device(path: str) -> bool:
     return path.startswith("\\\\.\\") or path.startswith("/dev/")
-
-
-def _source_size(path: str) -> int:
-    try:
-        if _is_device(path):
-            with open(path, "rb") as f:
-                return f.seek(0, os.SEEK_END)
-        return os.path.getsize(path)
-    except OSError:
-        return 0
 
 
 # ── Legal holds (evidence lock) ──────────────────────────────────────────────

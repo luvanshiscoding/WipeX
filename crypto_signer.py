@@ -1,14 +1,16 @@
 """
-WipeX - Hardware-Bound Cryptographic Signer
-Generates tamper-proof SHA-256 digests, nonces, and genuine NIST P-256 (secp256r1) ECDSA digital signatures.
+WipeX - workstation signing key.
+ECDSA P-256 (secp256r1) signatures over SHA-256 for certificates and audit entries.
+The key pair is generated on first use and kept in <data dir>/keys (never committed).
 """
 
-import os
 import base64
 import hashlib
+import os
 import secrets
-import time
-from typing import Dict, Any, Optional
+from typing import Optional
+
+import paths
 
 try:
     from cryptography.hazmat.primitives.asymmetric import ec
@@ -20,12 +22,9 @@ except ImportError:
 
 
 class CryptoSigner:
-    """
-    Cryptographic signer that seals sanitization records with hardware-bound hashes
-    and genuine ECDSA NIST P-256 asymmetric digital signatures.
-    """
+    """Workstation ECDSA P-256 signer (certificates, audit log)."""
 
-    _KEY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keys")
+    _KEY_DIR = os.environ.get("WIPEX_KEYS") or os.path.join(paths.data_dir(), "keys")
     _PRIVATE_KEY_PATH = os.path.join(_KEY_DIR, "signer_private.pem")
     _PUBLIC_KEY_PATH = os.path.join(_KEY_DIR, "signer_public.pem")
     _private_key = None
@@ -72,7 +71,7 @@ class CryptoSigner:
 
     @classmethod
     def get_public_key_pem(cls) -> str:
-        """Returns the platform authority public key in PEM format."""
+        """Workstation public key (PEM); empty when the cryptography library is missing."""
         cls._init_keys()
         if HAS_CRYPTOGRAPHY and cls._public_key is not None:
             pem = cls._public_key.public_bytes(
@@ -80,7 +79,7 @@ class CryptoSigner:
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             )
             return pem.decode("utf-8")
-        return "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0WIPEXAUTHPUBKEY2026\n-----END PUBLIC KEY-----"
+        return ""
 
     @staticmethod
     def generate_nonce() -> str:
@@ -139,17 +138,3 @@ class CryptoSigner:
             return True
         except (InvalidSignature, Exception):
             return False
-
-    @classmethod
-    def build_canonical_payload(
-        cls,
-        serial: str,
-        model: str,
-        capacity: str,
-        nonce: str,
-        method: str,
-        timestamp: str,
-        outcome: str
-    ) -> str:
-        """Builds standard canonical string for tamper-proof signing."""
-        return f"WIPEX-V2:{serial}:{model}:{capacity}:{nonce}:{method}:{timestamp}:{outcome}"

@@ -1,11 +1,14 @@
 """
-WipeX - Recovery benchmark (research gap G4).
+WipeX - Recovery benchmark (performance evaluation).
 
-Runs file-system recovery and carving separately against an image with a ground-truth
-file (<image>.truth.json, written by lab_images or supplied for public datasets in the
-same format: [{name, ext, sha256, size, state}]) and reports recall, precision and
-throughput per technique and per file type. Matching is by SHA-256, so only byte-exact
-recoveries count.
+Runs file-system recovery and carving separately against a raw or E01 image with a
+ground-truth file and reports recall, precision and throughput per technique and per
+file type. Matching is by SHA-256, so only byte-exact recoveries count.
+
+Ground truth: <image>.truth.json (written by lab_images), or any JSON file in the same
+format for public test images (e.g. DFRWS carving challenges, NIST CFReDS):
+    {"files": [{"name": "a.jpg", "ext": "jpg", "sha256": "...", "size": 1234,
+                "state": "live" | "deleted" | "orphan", "fragmented": false}, ...]}
 """
 
 import json
@@ -15,6 +18,7 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
+import ewf
 import store
 from recovery import carver, fs_recovery
 from recovery.formats import EXT_TO_FORMAT
@@ -29,7 +33,9 @@ def _load_truth(image_path: str, truth_path: Optional[str]) -> Dict[str, Any]:
 def run(image_path: str, truth_path: Optional[str] = None, progress=None) -> Dict[str, Any]:
     truth = _load_truth(image_path, truth_path)["files"]
     work = store.workspace_path("benchmarks", f"run-{int(time.time())}")
-    size = os.path.getsize(image_path)
+    img = ewf.open_image(image_path)
+    size = img.size
+    img.close()
     try:
         t = time.time()
         fs = fs_recovery.scan(image_path, os.path.join(work, "fs"), progress=(lambda p, m: progress(p * 40 // 100, m)) if progress else None)

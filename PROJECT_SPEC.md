@@ -1,85 +1,85 @@
-# WipeX — System Specification (SIH 2026 · SIH26149 · NTRO)
+# WipeX — System Specification
 
-> **Mission:** One integrated forensic workstation that (a) securely erases drives, (b) securely erases individual files and folders together with their metadata traces, and (c) recovers deleted files from damaged or formatted media. Every operation is verified, logged and reported.
+**SIH 2026 · SIH26149 · NTRO** — integrated secure data erasure and advanced file recovery.
 
-See [README.md](README.md) for the competitor landscape and research gaps (G1–G8) behind this design.
+> **Mission:** one offline forensic workstation that (a) securely erases drives, (b) securely erases individual files and folders together with their metadata traces, and (c) recovers deleted files from damaged or formatted media. Every operation is verified, attributed to a signed-in person, logged and reported.
 
 ---
 
 ## 1. Modules
 
-### M1 — Secure Drive Eraser (existing; extend)
+### M1 — Secure Drive Eraser
 | Item | Spec |
 |---|---|
-| Inputs | Physical drive (SATA HDD/SSD, NVMe, USB, SD), Android device (ADB), raw disk image |
-| Methods | NIST 800-88 Clear (1-pass), DoD 3-pass, Gutmann 35-pass, NVMe Sanitize/Format SES, ATA Secure Erase, TCG Opal crypto-erase, physical-destroy order |
-| Method selection | By media type: flash media is steered to crypto/firmware purge; magnetic media to overwrite |
-| Safety | Boot-disk lock; **evidence lock** (refuses media under legal hold, G5); dual approval |
-| Verification | Pattern-aware read-back (G8) + Recovery-as-Verifier (G1) |
-| Output | ECDSA P-256 signed certificate (JSON/PDF) + audit-log entries |
-| Code | `wipe_engine.py`, `entropy_auditor.py`, `crypto_signer.py` |
+| Inputs | Physical drives (SATA HDD/SSD, NVMe, USB, SD), Android devices (ADB), disk images |
+| Methods | NIST 800-88 Clear (1 pass), single zero, keyed random, DoD 3-pass, Gutmann 35; Purge: NVMe Sanitize crypto / block erase, NVMe Format with crypto erase, ATA Security Erase, TCG Opal PSID revert; Destroy order |
+| Method selection | Per device and OS: firmware capabilities are read from the controller (NVMe Identify SANICAP/FNA, hdparm security state, sedutil) and unavailable methods are shown with the reason |
+| Safety | System disk refused; legal-hold lock; two-person rule with password-verified approver; PSID used once and never stored |
+| Verification | Pattern read-back (full up to 2 GiB, sampled beyond), before/after change check for firmware purges, canary blocks (images), recovery attempt with M3 |
+| Output | Certificate signed by the workstation key and the operator's personal key, with the approver's signed approval embedded; PDF with QR code and BSA §63 annexure draft |
+| Code | `erasure.py`, `hw_sanitize.py`, `wipe_engine.py` |
 
-### M2 — Secure File & Folder Eraser (new)
+### M2 — Secure File & Folder Eraser
 | Item | Spec |
 |---|---|
-| Inputs | File or folder paths on a mounted volume, or inside an image |
-| Content erasure | Overwrite (pattern per policy) → flush → rename to random name → truncate → unlink |
-| Metadata erasure | Timestamps, ADS / xattrs, and filename traces in parent directory |
-| Artifact cleanup (G2) | Windows: LNK, Jump Lists, thumbcache, Prefetch, Recent. NTFS: `$UsnJrnl` / `$I30` / VSS reporting. Linux: ext4 journal, thumbnails cache |
-| Storage policy (G3) | Detects SSD/TRIM, copy-on-write file systems (APFS, Btrfs, ReFS) and flash media; warns the operator and offers M1 escalation |
-| Verification | Re-scan with M3 for the erased file's signatures and name |
-| Code | `file_eraser.py` (planned) |
+| Inputs | Files and folders on a mounted volume |
+| Content erasure | Overwrite (zero / random / 3-pass) → fsync → truncate → 3 random renames → timestamp reset → delete; folders bottom-up |
+| Metadata erasure | NTFS alternate data streams; Linux `user.*` and macOS extended attributes (overwritten, then removed) |
+| Trace cleanup | Windows: Recent shortcuts, Jump Lists referencing the file, thumbcache (reported). Linux: recently-used.xbel, thumbnails. macOS: parent `.DS_Store`, Gatekeeper quarantine-event record, QuickLook cache, recent-items lists (reported) |
+| Storage policy | Detects file system, media type, bus and TRIM (incl. LVM / dm-crypt / btrfs on Linux); rates assurance High / Limited / Not effective and recommends M1 when needed |
+| Change journal | NTFS `$UsnJrnl` state detected; optional clearing after erasure (the journal is restarted empty) |
+| Verification | Trace check after every erasure: each folder is read straight from the volume with The Sleuth Kit for the original names and for deleted entries holding the original content (SHA-256). Needs Administrator on Windows, root on Linux/macOS. On Windows the NTFS change journal is also searched via `FSCTL_READ_USN_JOURNAL`. Verdict PASS / TRACES_REMAIN / PARTIAL |
+| Guards | Protected system locations, drive roots and home folders refused; legal holds; two-person rule |
+| Code | `file_eraser.py` |
 
-### M3 — Advanced File Carving & Recovery (new)
+### M3 — Carving & Recovery
 | Item | Spec |
 |---|---|
-| Inputs | Raw/dd image, E01 (optional), or read-only device handle |
-| Acquisition | Hash the source (SHA-256) → work only on a copy → log a custody event |
-| Techniques | (1) FS-metadata recovery: NTFS `$MFT`, FAT32/exFAT, ext4 deleted entries; (2) signature carving; (3) **structural validation**: JPEG markers, PNG CRC, PDF xref, ZIP/DOCX central directory, MP4 atoms; (4) bifragment gap carving for fragmented files |
-| Output | Recovered files + per-file SHA-256, offset, technique used, validation result, confidence score |
-| Code | `recovery/` package (planned) |
+| Inputs | Windows drive letters (whole volume or one folder, read-only, Administrator), raw images, raw devices, E01 images; acquired evidence |
+| Acquisition | Read source once → write raw `.dd` or E01 (zlib chunks, case metadata, MD5 + SHA-1 sections) → re-read and re-hash; SHA-256 + MD5 recorded |
+| Techniques | (1) File-system metadata via The Sleuth Kit (NTFS, FAT, exFAT, ext2/3/4, HFS+, ISO 9660, partition tables); (2) signature carving with structural validation (JPEG decode, PNG CRC, GIF, BMP, PDF, ZIP/Office member CRC, SQLite, MP4); (3) bifragment gap carving for PNG and ZIP |
+| Output | Recovered files with SHA-256, offset, technique, validation result, confidence; content status for deleted entries (intact / damaged / overwritten / zeroed by TRIM / unverified); PDF report |
+| Code | `recovery/`, `ewf.py` |
 
----
-
-## 2. Cross-cutting Services
+## 2. Cross-cutting services
 | Service | Spec |
 |---|---|
-| **Audit log** | Append-only; each entry = `{seq, ts, actor, action, target, details, prev_hash, hash, signature}`; signature via `CryptoSigner.sign_payload`; `/api/audit/verify` recomputes the chain and reports the first break |
-| **Cases & custody** | Tables: `cases`, `evidence`, `custody_events`, `legal_holds`. Every M1/M2/M3 action references a case ID |
-| **Reports** | PDF (ReportLab) + JSON: recovery report, erasure certificate, BSA 2023 §63 annexure (G7) |
-| **Roles** | Investigator (M3), Sanitizer (M1/M2), Auditor (read-only logs and reports) |
-| **Benchmarks (G4)** | `benchmarks/` runs M3 on DFRWS 2006/2007, NIST CFReDS and Digital Corpora images; reports precision, recall and MB/s against PhotoRec and Scalpel |
-
----
+| Users and roles | Administrator, Investigator, Sanitizer, Auditor; scrypt password hashes; per-user ECDSA P-256 key encrypted with the user's password and unlocked only for the session; password reset issues a new key and old keys stay verifiable (`users.py`) |
+| Audit log | Append-only; entry = `{seq, ts, actor, action, case_id, target, details}`; `hash = SHA-256(prev_hash ‖ canonical JSON)`; signed by the workstation key and, when the actor is signed in, by the actor's key; verification reports the first break (`audit_log.py`) |
+| Cases and custody | Cases, evidence items, legal holds; every module action is logged with its case id (`cases.py`) |
+| Reports | PDF certificate, recovery report, file-erasure report; JSON audit export including all user public keys (`reports.py`) |
+| Benchmark | Recall, precision and throughput per technique and file type against a truth file; raw or E01 images (`benchmark.py`) |
+| Storage | One SQLite file, a workspace folder and a keys folder in the per-user data directory (`paths.py`, `store.py`, `database.py`) |
 
 ## 3. Workflows
 
 ```
-RECOVER:   Case → Acquire (hash) → Parse FS → Carve → Validate → Review → Signed report
-ERASE:     Case check (legal hold?) → Dual approval → Erase (M1/M2) → Verify:
-                pattern read-back (G8) → Recovery-as-Verifier with M3 (G1) → Signed certificate
-AUDIT:     Every step → hash-chained, signed log entry → verifiable at any time
+RECOVER:  Case → Acquire (raw or E01, hashed, re-verified) → Sleuth Kit + carving → review → signed PDF report
+ERASE:    Legal-hold check → two-person approval (approver signs in) → erase (M1 / M2) →
+          verify: pattern read-back → canaries → recovery attempt with M3 → signed certificate
+AUDIT:    Every step → hash-chained entry signed by workstation + person → verifiable at any time
 ```
 
----
+## 4. API (`main.py`, OpenAPI docs at `/docs`)
+| Area | Endpoints | Permission |
+|---|---|---|
+| Health | `GET /api/health` | public |
+| Sign-in | `GET /api/auth/state`, `POST /api/auth/setup` (first run), `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/password` | public / signed in |
+| Users | `GET /api/roles`, `GET/POST /api/users`, `PATCH /api/users/{username}` | users.manage |
+| Devices | `GET /api/devices`, `GET /api/methods`, `POST /api/storage/unfreeze/{id}` | device.read / erasure.run |
+| Drive erasure | `POST /api/wipe/start`, `GET /api/wipe/status/{id}`, `POST /api/audit/run/{id}` | erasure.run / device.read |
+| Certificates | `POST /api/certificates/generate`, `GET /api/verify/{id or serial}` (public), `GET /api/certificates/{id}/pdf`, `GET /api/certificates` | certificate.issue / report.read |
+| Android | `GET /api/devices/android`, `POST /api/wipe/android/start` (job) | device.read / erasure.run |
+| Lab images | `GET/POST /api/lab/images`, `POST /api/lab/images/{id}/reset`, `DELETE /api/lab/images/{id}` | lab.manage |
+| File erasure | `GET /api/fs/list`, `POST /api/files/analyze`, `POST /api/files/erase` (job), `POST /api/files/sandbox`, `GET /api/files/report/{job}.pdf` | files.erase |
+| Recovery | `GET /api/recovery/sources`, `POST /api/recovery/scan` (job; source drive / lab / evidence / path, optional folder), `POST /api/recovery/{job}/open`, `GET /api/recovery/file`, `GET /api/recovery/{job}/report.pdf`, `GET /api/recovery/formats`, `POST /api/benchmark` (job) | recovery.run / report.read |
+| Jobs | `GET /api/jobs`, `GET /api/jobs/{id}` | signed in |
+| Cases | `GET/POST /api/cases`, `GET /api/cases/{id}`, `POST /api/cases/{id}/status`, `POST /api/cases/{id}/evidence` (job, raw or E01), `POST /api/evidence/{id}/verify`, `GET /api/evidence/{id}/info` | case.read / case.manage / evidence.acquire |
+| Holds and policy | `POST /api/cases/{id}/holds`, `POST /api/holds/{id}/release`, `GET /api/holds`, `GET/POST /api/settings/dual-approval` | hold.manage / settings.manage |
+| Audit | `GET /api/audit/log`, `GET /api/audit/verify`, `GET /api/audit/export` | audit.read |
 
-## 4. API Surface (implemented — `main.py`, docs at `/docs`)
-| Area | Endpoints |
-|---|---|
-| Health | `GET /api/health` (capabilities, admin rights, counts) |
-| M1 devices & erasure | `GET /api/devices?refresh=`, `GET /api/methods`, `POST /api/wipe/start`, `GET /api/wipe/status/{id}`, `POST /api/audit/run/{id}` (verification) |
-| Certificates | `POST /api/certificates/generate`, `GET /api/verify/{id or serial}` (exact match), `GET /api/certificates/{id}/pdf`, `GET /api/certificates` |
-| Lab images | `GET/POST /api/lab/images`, `POST /api/lab/images/{id}/reset`, `DELETE /api/lab/images/{id}` |
-| M2 files | `GET /api/fs/list`, `POST /api/files/analyze`, `POST /api/files/erase` (job), `POST /api/files/sandbox`, `GET /api/files/report/{job}.pdf` |
-| M3 recovery | `POST /api/recovery/scan` (job), `GET /api/recovery/file`, `GET /api/recovery/{job}/report.pdf`, `GET /api/recovery/formats`, `POST /api/benchmark` (job) |
-| Jobs | `GET /api/jobs`, `GET /api/jobs/{id}` |
-| Cases | `GET/POST /api/cases`, `GET /api/cases/{id}`, `POST /api/cases/{id}/status`, `POST /api/cases/{id}/evidence` (job), `POST /api/evidence/{id}/verify` |
-| Holds & policy | `POST /api/cases/{id}/holds`, `POST /api/holds/{id}/release`, `GET /api/holds`, `GET/POST /api/settings/dual-approval` |
-| Audit | `GET /api/audit/log`, `GET /api/audit/verify`, `GET /api/audit/export` |
-| Android | `GET /api/devices/android`, `POST /api/wipe/android/start` |
-
-## 5. Non-functional Requirements
-- **Forensic soundness:** recovery never writes to source media; all analysis runs on hashed working copies.
-- **Offline:** no network dependency at runtime (air-gapped deployment).
-- **Honesty:** every report states the verification level actually reached (e.g. "Clear, file-level, SSD: physical erasure not guaranteed").
-- **Portability:** Windows 10/11, Linux (hardware sanitize commands), macOS.
+## 5. Non-functional requirements
+- **Forensic soundness:** recovery never writes to source media; evidence is analysed from hashed copies.
+- **Offline:** no network access at runtime; the engine serves the UI and accepts only local requests.
+- **Honesty:** reports state the verification level actually reached and every method that could not run is explained.
+- **Portability:** Windows 10/11, Linux, macOS; see README §4 for the per-OS capability matrix.

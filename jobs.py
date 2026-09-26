@@ -1,9 +1,11 @@
 """
 WipeX - Background job runner for long operations (recovery scans, acquisition,
 file erasure, benchmarks). Progress and results are persisted in the jobs table
-so the UI can poll /api/jobs/{id}.
+so the UI can poll /api/jobs/{id}. Jobs run with a copy of the caller's context, so
+audit entries they write are still signed by the user who started them.
 """
 
+import contextvars
 import json
 import secrets
 import threading
@@ -52,7 +54,8 @@ def submit(kind: str, fn: Callable[[JobContext], Dict[str, Any]], params: Option
                 conn.execute("UPDATE jobs SET status='FAILED', message=?, result=?, finished_at=? WHERE id=?",
                              (str(exc), json.dumps({"error": str(exc), "trace": traceback.format_exc(limit=3)}), _now(), job_id))
 
-    threading.Thread(target=runner, name=job_id, daemon=True).start()
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run, args=(runner,), name=job_id, daemon=True).start()
     return job_id
 
 

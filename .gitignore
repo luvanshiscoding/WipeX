@@ -17,3 +17,13 @@ keys/
 # Workspace: lab images, case evidence, recovered files, reports
 workspace/
 *.bak
+
+# Private working notes (presentation drafts, research) - kept locally, not published
+SIH_PPT_CONTENT.md
+notes/
+*.private.md
+
+# Evidence images and E01 segments created during testing
+*.E0[0-9]
+*.img
+*.dd

@@ -426,6 +426,26 @@ class WipeEngine:
 
         return deleted_files
 
+    def _macos_system_disks(self) -> set:
+        """Whole disks backing the running system volume (/), resolved through the APFS container."""
+        if getattr(self, "_mac_sys", None) is not None:
+            return self._mac_sys
+        found = set()
+        try:
+            root = plistlib.loads(subprocess.run(["diskutil", "info", "-plist", "/"], capture_output=True, timeout=10).stdout)
+            parent = root.get("ParentWholeDisk") or ""
+            found.add(parent)
+            cont = plistlib.loads(subprocess.run(["diskutil", "info", "-plist", parent], capture_output=True, timeout=10).stdout)
+            for store in cont.get("APFSPhysicalStores") or []:
+                ident = store.get("APFSPhysicalStore", "") if isinstance(store, dict) else str(store)
+                m = re.match(r"^(disk\d+)", ident)
+                if m:
+                    found.add(m.group(1))
+        except Exception:  # noqa: BLE001 - fall back to the heuristic in _probe_macos
+            pass
+        self._mac_sys = {d for d in found if d}
+        return self._mac_sys
+
     def _probe_macos(self) -> List[Dict[str, Any]]:
         """Probe real physical storage drives using macOS diskutil plist API. NO FAKE DATA."""
         try:
@@ -591,7 +611,8 @@ class WipeEngine:
             else:
                 masked_serial = serial_number
 
-            is_boot_drive = internal and (protocol == "Apple Fabric" or info.get("APFSContainerUUID")) and not removable
+            is_boot_drive = (internal and (protocol == "Apple Fabric" or info.get("APFSContainerUUID")) and not removable) \
+                or disk in self._macos_system_disks()
 
             dev_id = f"dev-{disk}-{serial_number[:6].lower()}" if serial_number else f"dev-{disk}"
 
@@ -653,7 +674,7 @@ class WipeEngine:
         devices = []
         try:
             r = subprocess.run(
-                ["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MODEL,SERIAL,TRAN,HOTPLUG,ROTA,MOUNTPOINT,LABEL,FSTYPE,PARTLABEL"],
+                ["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MODEL,SERIAL,TRAN,HOTPLUG,ROTA,MOUNTPOINT,MOUNTPOINTS,LABEL,FSTYPE,PARTLABEL"],
                 capture_output=True, timeout=10
             )
             import json
@@ -697,15 +718,29 @@ class WipeEngine:
             child_labels = []
             def walk_children(children):
                 for c in children or []:
-                    mp = c.get("mountpoint") or ""
+                    # lsblk >= 2.37 reports "mountpoints" (a list); older versions "mountpoint"
+                    mps = [m for m in (c.get("mountpoints") or [c.get("mountpoint")]) if m]
                     lab = c.get("label") or c.get("partlabel") or ""
                     dev_child = f"/dev/{c.get('name','')}"
-                    if mp:
+                    for mp in mps:
                         child_mounts.append((mp, dev_child, lab or c.get("fstype") or ""))
                     if lab:
                         child_labels.append(lab)
                     walk_children(c.get("children"))
+            # The disk itself can carry a file system without a partition table (e.g. WSL, USB sticks)
+            walk_children([{k: v for k, v in dev.items() if k != "children"}])
             walk_children(dev.get("children"))
+            # A disk that backs the running system also counts when its mount is only visible via /proc/mounts
+            try:
+                with open("/proc/mounts", encoding="utf-8") as pm:
+                    for line in pm:
+                        src, mnt = line.split()[:2]
+                        real = os.path.realpath(src) if src.startswith("/dev/") else ""
+                        if real and (real == device_path or real.startswith(device_path)) and \
+                                mnt in ("/", "/boot", "/boot/efi", "/usr", "/var"):
+                            child_mounts.append((mnt, real, ""))
+            except OSError:
+                pass
 
             # Size — prefer blockdev, fallback to parsed lsblk SIZE (converts 10G etc)
             size_bytes = 0
@@ -821,7 +856,7 @@ class WipeEngine:
                 serial = f"NOSERIAL-{name.upper()}"
             masked = serial[:4] + "****" + serial[-4:] if len(serial) >= 8 else serial
 
-            is_boot_drive = any(mp in ("/", "/boot", "/boot/efi") for mp, _, _ in child_mounts)
+            is_boot_drive = any(mp in ("/", "/boot", "/boot/efi", "/usr", "/var", "[SWAP]") for mp, _, _ in child_mounts)
 
             # REAL used space — accumulate from df for this disk's partitions/mounts
             total_cap_from_df = 0
@@ -927,96 +962,108 @@ class WipeEngine:
 
         return devices
 
+    _WIN_PROBE_PS = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$pd = @{}; Get-PhysicalDisk | ForEach-Object { $pd[[string]$_.DeviceId] = $_ }
+@(Get-Disk | ForEach-Object {
+  $p = $pd[[string]$_.Number]
+  $rc = if ($p) { $p | Get-StorageReliabilityCounter } else { $null }
+  $vols = @(Get-Partition -DiskNumber $_.Number | Where-Object DriveLetter | ForEach-Object {
+      $v = $_ | Get-Volume
+      [pscustomobject]@{ Letter = [string]$_.DriveLetter; Size = $v.Size; Free = $v.SizeRemaining; Fs = [string]$v.FileSystemType } })
+  [pscustomobject]@{
+    Number = $_.Number; FriendlyName = $_.FriendlyName; SerialNumber = $_.SerialNumber; Size = $_.Size
+    BusType = [string]$_.BusType; IsBoot = $_.IsBoot; IsSystem = $_.IsSystem; IsOffline = $_.IsOffline
+    OperationalStatus = [string]$_.OperationalStatus; HealthStatus = [string]$_.HealthStatus
+    MediaType = if ($p) { [string]$p.MediaType } else { '' }; Firmware = if ($p) { $p.FirmwareVersion } else { '' }
+    Temperature = if ($rc) { $rc.Temperature } else { $null }; Wear = if ($rc) { $rc.Wear } else { $null }
+    PowerOnHours = if ($rc) { $rc.PowerOnHours } else { $null }
+    ReadErrorsUncorrected = if ($rc) { $rc.ReadErrorsUncorrected } else { $null }
+    Volumes = $vols
+  } }) | ConvertTo-Json -Depth 4 -Compress
+"""
+
     def _probe_windows(self) -> List[Dict[str, Any]]:
         """
-        Discovers physically connected drives on Windows using PowerShell Get-Disk / Get-PhysicalDisk.
+        Physically connected disks on Windows: Get-Disk / Get-PhysicalDisk / reliability
+        counters, plus the NVMe health log read through the storage driver. Values that
+        cannot be read are reported as unavailable, never guessed.
         """
-        devices = []
+        import json
+        import hw_sanitize
         try:
-            ps_cmd = (
-                "Get-Disk | Select-Object Number, FriendlyName, SerialNumber, Size, "
-                "BusType, OperationalStatus, IsBoot, IsSystem, PartitionStyle | "
-                "ConvertTo-Json -Compress"
-            )
-            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=10)
-            if res.returncode == 0 and res.stdout.strip():
-                import json
-                try:
-                    data = json.loads(res.stdout.decode("utf-8", errors="ignore"))
-                    if isinstance(data, dict):
-                        data = [data]
-                    for disk in data:
-                        disk_num = disk.get("Number", 0)
-                        model = disk.get("FriendlyName") or f"Physical Disk {disk_num}"
-                        serial = disk.get("SerialNumber", "").strip() or f"WIN-DISK-{disk_num}"
-                        size_bytes = int(disk.get("Size") or 0)
-                        bus_type = str(disk.get("BusType") or "").upper()
-                        is_boot = bool(disk.get("IsBoot") or disk.get("IsSystem") or False)
-                        
-                        is_ssd = "NVME" in bus_type or "SSD" in model.upper()
-                        storage_type = "NVMe SSD" if "NVME" in bus_type else ("SATA SSD" if is_ssd else "Magnetic HDD")
-                        
-                        # Fetch drive letters / partitions for this disk
-                        child_mounts = []
-                        current_files = []
-                        vol_ps = f"Get-Partition -DiskNumber {disk_num} | Where-Object DriveLetter | Select-Object DriveLetter | ConvertTo-Json -Compress"
-                        vol_res = subprocess.run(["powershell", "-NoProfile", "-Command", vol_ps], capture_output=True, timeout=5)
-                        if vol_res.returncode == 0 and vol_res.stdout.strip():
-                            try:
-                                vdata = json.loads(vol_res.stdout.decode("utf-8", errors="ignore"))
-                                if isinstance(vdata, dict):
-                                    vdata = [vdata]
-                                for v in vdata:
-                                    dl = v.get("DriveLetter")
-                                    if dl:
-                                        mount_str = f"{dl}:\\"
-                                        child_mounts.append(mount_str)
-                                        current_files.append({"name": f"💾 Drive {dl}:", "size": ""})
-                            except Exception:
-                                pass
-
-                        masked_serial = (serial[:4] + "****" + serial[-4:]) if len(serial) >= 8 else serial
-                        rec_method = "purge-nvme-crypto" if "NVME" in bus_type else ("purge-ata-secure" if is_ssd else "clear-single")
-                        
-                        devices.append({
-                            "id": f"dev-disk-{disk_num}",
-                            "devicePath": rf"\\.\PhysicalDrive{disk_num}",
-                            "model": model,
-                            "type": storage_type,
-                            "interface": bus_type or "SATA/NVMe",
-                            "capacity": self._human_size(size_bytes),
-                            "capacityBytes": size_bytes,
-                            "serialNumber": serial,
-                            "maskedSerial": masked_serial,
-                            "firmware": "WIN-STD",
-                            "healthStatus": "HEALTHY",
-                            "healthScore": 95,
-                            "reallocatedSectors": 0,
-                            "wearLevel": "95% Remaining" if is_ssd else "N/A (Mechanical)",
-                            "powerOnHours": "N/A",
-                            "temperature": "N/A",
-                            "hpaDetected": False,
-                            "hpaSize": "0 MB",
-                            "dcoDetected": False,
-                            "cryptoEraseSupported": is_ssd,
-                            "ataSecurityFrozen": False,
-                            "recommendedMethod": rec_method,
-                            "expectedOutcome": "GREEN",
-                            "isBootDrive": is_boot,
-                            "removable": bus_type in ("USB", "SD"),
-                            "smartStatus": disk.get("OperationalStatus") or "OK",
-                            "capacityUsedBytes": 0,
-                            "capacityUsedPct": 0.0,
-                            "isAlreadyClean": False,
-                            "currentFiles": current_files,
-                            "deletedRecoverableFiles": self._find_recoverable_deleted_files(child_mounts, False),
-                            "volumeInfo": [{"name": m, "mount": m, "size": size_bytes} for m in child_mounts],
-                            "mountedPaths": child_mounts
-                        })
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", self._WIN_PROBE_PS],
+                                 capture_output=True, timeout=45)
+            data = json.loads(res.stdout.decode("utf-8", errors="ignore") or "[]")
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return []
+        if isinstance(data, dict):
+            data = [data]
+        devices = []
+        for disk in data:
+            num = disk.get("Number")
+            if num is None:
+                continue
+            path = rf"\\.\PhysicalDrive{num}"
+            model = (disk.get("FriendlyName") or f"Physical Disk {num}").strip()
+            serial = (disk.get("SerialNumber") or "").strip().rstrip(".") or f"WIN-DISK-{num}"
+            size_bytes = int(disk.get("Size") or 0)
+            bus = str(disk.get("BusType") or "").upper()
+            media = str(disk.get("MediaType") or "")
+            solid = media == "SSD" or bus == "NVME"
+            storage_type = ("NVMe SSD" if bus == "NVME" else "SATA SSD" if media == "SSD" else
+                            "USB / removable" if bus in ("USB", "SD", "MMC") else
+                            "Magnetic HDD" if media == "HDD" else "Unspecified")
+            temp, wear_used, poh = disk.get("Temperature"), disk.get("Wear"), disk.get("PowerOnHours")
+            media_errors = disk.get("ReadErrorsUncorrected")
+            if bus == "NVME":
+                h = hw_sanitize.windows_nvme_info(path).get("health") or {}
+                temp = h.get("temperatureC", temp)
+                wear_used = h.get("percentageUsed", wear_used)
+                poh = h.get("powerOnHours", poh)
+                media_errors = h.get("mediaErrors", media_errors)
+            health = str(disk.get("HealthStatus") or "Unknown")
+            health_status = {"Healthy": "HEALTHY", "Warning": "WARNING", "Unhealthy": "FAILING"}.get(health, "UNKNOWN")
+            vols = disk.get("Volumes") or []
+            if isinstance(vols, dict):
+                vols = [vols]
+            mounts = [f"{v['Letter']}:\\" for v in vols if v.get("Letter")]
+            used = sum(int(v.get("Size") or 0) - int(v.get("Free") or 0) for v in vols)
+            devices.append({
+                "id": f"dev-disk-{num}",
+                "devicePath": path,
+                "model": model,
+                "type": storage_type,
+                "interface": bus or "Unknown",
+                "capacity": self._human_size(size_bytes),
+                "capacityBytes": size_bytes,
+                "serialNumber": serial,
+                "maskedSerial": (serial[:4] + "****" + serial[-4:]) if len(serial) >= 8 else serial,
+                "firmware": disk.get("Firmware") or "N/A",
+                "healthStatus": health_status,
+                "healthScore": None if wear_used is None else max(0, 100 - int(wear_used)),
+                "reallocatedSectors": int(media_errors or 0),
+                "wearLevel": f"{max(0, 100 - int(wear_used))}% Remaining" if (solid and wear_used is not None)
+                             else ("N/A (Mechanical)" if media == "HDD" else "N/A"),
+                "powerOnHours": f"{int(poh):,} Hours" if poh is not None else "N/A",
+                "temperature": f"{int(temp)}°C" if temp else "N/A",
+                "hpaDetected": False,
+                "hpaSize": "N/A",
+                "dcoDetected": False,
+                "ataSecurityFrozen": None,
+                "expectedOutcome": "RED" if health_status == "FAILING" else "GREEN",
+                "isBootDrive": bool(disk.get("IsBoot") or disk.get("IsSystem")),
+                "removable": bus in ("USB", "SD", "MMC"),
+                "smartStatus": disk.get("OperationalStatus") or "Unknown",
+                "capacityUsedBytes": used,
+                "capacityUsedPct": round(used * 100 / size_bytes, 1) if size_bytes else 0.0,
+                "isAlreadyClean": False,
+                "currentFiles": [{"name": f"Volume {v['Letter']}: ({v.get('Fs') or 'unknown'})",
+                                  "size": self._human_size(int(v.get("Size") or 0))} for v in vols if v.get("Letter")],
+                "deletedRecoverableFiles": self._find_recoverable_deleted_files(mounts, False),
+                "volumeInfo": [{"name": m, "mount": m, "size": size_bytes} for m in mounts],
+                "mountedPaths": mounts,
+            })
         return devices
 
     def unfreeze_hpa_dco(self, device_id: str) -> Dict[str, Any]:
@@ -1048,7 +1095,7 @@ class WipeEngine:
         return out
 
     def resolve_device(self, device_id: str) -> Optional[Dict[str, Any]]:
-        """Resolves device_id (e.g. dev-disk6-cruzer, /dev/disk6, disk6, \\.\PhysicalDrive0, serial) to probed device info."""
+        r"""Resolves device_id (e.g. dev-disk6-cruzer, /dev/disk6, disk6, \\.\PhysicalDrive0, serial) to probed device info."""
         devices = self.probe_devices()
         dev_clean = device_id.strip()
         for d in devices:
@@ -1068,180 +1115,129 @@ class WipeEngine:
                         return d
         return None
 
-    def _unmount_device_safely(self, device_path: str, mounted_paths: List[str]) -> bool:
-        """Unmounts all active partitions on the target disk prior to low-level raw writes."""
-        system = platform.system()
-        try:
-            if system == "Darwin" and shutil.which("diskutil"):
-                disk_id = os.path.basename(device_path).replace("rdisk", "disk")
-                res = subprocess.run(["diskutil", "unmountDisk", "force", f"/dev/{disk_id}"], capture_output=True, text=True, timeout=15)
-                return res.returncode == 0
-            elif system == "Linux" and shutil.which("umount"):
-                for mp in mounted_paths:
-                    if mp and mp not in ("/", "/boot", "/home", "/System", "/usr", "/bin"):
-                        subprocess.run(["umount", "-f", mp], capture_output=True, timeout=10)
-                if device_path.startswith("/dev/"):
-                    # Unmount all partition nodes /dev/sdX1, /dev/sdX2, etc.
-                    subprocess.run(f"umount -f {device_path}* 2>/dev/null", shell=True, timeout=10)
-                return True
-            elif system == "Windows":
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _execute_hardware_nvme_sanitize(self, device_path: str, mode: str = "crypto") -> Tuple[bool, str]:
-        """Issues NVMe hardware controller sanitize or format command."""
-        if not shutil.which("nvme"):
-            return False, "nvme-cli utility not installed"
-
-        try:
-            # Query controller capabilities
-            query_res = subprocess.run(["nvme", "id-ctrl", device_path, "-o", "json"], capture_output=True, text=True, timeout=10)
-            
-            if mode == "crypto":
-                # Try NVMe Sanitize Crypto Erase
-                res = subprocess.run(["nvme", "sanitize", device_path, "-a", "crypto"], capture_output=True, text=True, timeout=30)
-                if res.returncode == 0:
-                    return True, "NVMe Sanitize Crypto Erase completed successfully"
-
-                # Fallback to NVMe Format with SES=2 (Cryptographic Erase)
-                res_fmt2 = subprocess.run(["nvme", "format", device_path, "--namespace-id=1", "--ses=2", "--force"], capture_output=True, text=True, timeout=60)
-                if res_fmt2.returncode == 0:
-                    return True, "NVMe Format Cryptographic Erase (SES=2) completed successfully"
-
-                # Fallback to NVMe Format with SES=1 (User Data Erase)
-                res_fmt1 = subprocess.run(["nvme", "format", device_path, "--namespace-id=1", "--ses=1", "--force"], capture_output=True, text=True, timeout=60)
-                if res_fmt1.returncode == 0:
-                    return True, "NVMe Format User Data Erase (SES=1) completed successfully"
-
-            elif mode == "block":
-                res = subprocess.run(["nvme", "sanitize", device_path, "-a", "block"], capture_output=True, text=True, timeout=60)
-                if res.returncode == 0:
-                    return True, "NVMe Sanitize Block Erase completed successfully"
-
-        except Exception as e:
-            return False, str(e)
-
-        return False, "NVMe hardware sanitize commands failed or not supported by controller"
-
-    def _execute_hardware_ata_secure_erase(self, device_path: str, enhanced: bool = True) -> Tuple[bool, str]:
-        """Executes proper two-step ATA Secure Erase with password initialization."""
-        if not shutil.which("hdparm"):
-            return False, "hdparm utility not installed"
-
-        try:
-            # Check security status
-            identify = subprocess.run(["hdparm", "-I", device_path], capture_output=True, text=True, timeout=10)
-            if "frozen" in identify.stdout.lower():
-                return False, "ATA Security is FROZEN by BIOS/UEFI. Sleep/power cycle required to unfreeze."
-
-            # Step 1: Set user master password
-            set_pass = subprocess.run(["hdparm", "--user-master", "u", "--security-set-pass", "wipex", device_path], capture_output=True, text=True, timeout=30)
-            if set_pass.returncode != 0:
-                return False, f"Failed to set ATA security password: {set_pass.stderr.strip()}"
-
-            # Step 2: Issue Secure Erase
-            erase_flag = "--security-erase-enhanced" if enhanced else "--security-erase"
-            erase_res = subprocess.run(["hdparm", "--user-master", "u", erase_flag, "wipex", device_path], capture_output=True, text=True, timeout=1800)
-            if erase_res.returncode == 0:
-                return True, f"ATA {'Enhanced ' if enhanced else ''}Secure Erase completed"
-
-        except Exception as e:
-            return False, str(e)
-
-        return False, "ATA Secure Erase failed"
-
-    def _execute_hardware_sed_opal(self, device_path: str) -> Tuple[bool, str]:
-        """Executes TCG Opal 2.0 Cryptographic Erase on Self-Encrypting Drives (SED)."""
-        if not shutil.which("sedutil-cli"):
-            return False, "sedutil-cli utility not installed"
-
-        try:
-            res = subprocess.run(["sedutil-cli", "--cryptoerase", "admin1password", device_path], capture_output=True, text=True, timeout=30)
-            if res.returncode == 0:
-                return True, "TCG Opal SED Cryptographic Erase completed"
-        except Exception as e:
-            return False, str(e)
-
-        return False, "SED Opal crypto-erase failed"
-
     # ----------------------------------------------------------------------
-    # Android Mobile Device Sanitization Support (ZeroTrace Feature Parity)
+    # Android devices (ADB / fastboot)
     # ----------------------------------------------------------------------
+    @staticmethod
+    def _adb_prop(serial: str, prop: str) -> str:
+        try:
+            r = subprocess.run(["adb", "-s", serial, "shell", "getprop", prop], capture_output=True, text=True, timeout=10)
+            return r.stdout.strip()
+        except (subprocess.SubprocessError, OSError):
+            return ""
+
     def probe_android_devices(self) -> List[Dict[str, Any]]:
-        """Discovers connected Android devices via ADB / Fastboot."""
+        """Android devices visible to ADB, with the properties that decide how they can be sanitized."""
         if not shutil.which("adb"):
             return []
-
         devices = []
         try:
             res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=10)
-            if res.returncode == 0:
-                lines = res.stdout.strip().splitlines()[1:]
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split()
-                    serial = parts[0]
-                    state = parts[1] if len(parts) > 1 else "unknown"
-
-                    model = "Android Device"
-                    for p in parts[2:]:
-                        if p.startswith("model:"):
-                            model = p.replace("model:", "").replace("_", " ")
-
-                    devices.append({
-                        "id": f"android-{serial}",
-                        "serialNumber": serial,
-                        "model": model,
-                        "type": "Android Mobile Device",
-                        "status": state,
-                        "isBootDrive": False,
-                        "capacity": "Mobile Storage",
-                        "healthStatus": "GOOD" if state == "device" else "AUTHORIZATION_REQUIRED",
-                        "recommendedMethod": "android-master-clear",
-                        "expectedOutcome": "GREEN"
-                    })
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError):
+            return []
+        for line in res.stdout.strip().splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            serial, state = parts[0], parts[1]
+            model = next((p[6:].replace("_", " ") for p in parts[2:] if p.startswith("model:")), "Android device")
+            dev: Dict[str, Any] = {"id": f"android-{serial}", "serialNumber": serial, "model": model,
+                                   "type": "Android device", "status": state, "isBootDrive": False}
+            if state == "device":
+                crypto_type = self._adb_prop(serial, "ro.crypto.type")          # file | block | ""
+                encrypted = self._adb_prop(serial, "ro.crypto.state") == "encrypted"
+                vb = self._adb_prop(serial, "ro.boot.verifiedbootstate")        # green = locked, orange = unlocked
+                dev.update({
+                    "androidVersion": self._adb_prop(serial, "ro.build.version.release"),
+                    "manufacturer": self._adb_prop(serial, "ro.product.manufacturer"),
+                    "encryption": ("file-based" if crypto_type == "file" else "full-disk" if crypto_type == "block"
+                                   else "unknown") if encrypted else "none",
+                    "bootloaderUnlocked": vb == "orange" or self._adb_prop(serial, "ro.boot.flash.locked") == "0",
+                })
+                # With encryption on, a factory reset destroys the storage keys: NIST 800-88 cryptographic erase
+                dev["sanitizeClass"] = ("Purge (cryptographic erase via factory reset)" if encrypted
+                                        else "Clear (factory reset)")
+            else:
+                dev["note"] = ("Authorize this computer on the device (USB debugging prompt)"
+                               if state == "unauthorized" else state)
+            devices.append(dev)
         return devices
 
-    def wipe_android_device(self, wipe_id: str, serial: str, mode: str = "master-clear"):
-        """Executes enterprise mobile sanitization via ADB/Fastboot."""
-        import database
+    def wipe_android_device(self, serial: str, mode: str, progress=None) -> Dict[str, Any]:
+        """
+        mode fastboot-wipe : reboot to the bootloader and run fastboot -w (needs an unlocked bootloader).
+        mode guided-reset  : open the factory-reset screen; the operator confirms on the device.
+                             ADB cannot start a reset by itself on a locked production device, so this
+                             is recorded as operator-confirmed, not machine-verified.
+        """
+        def step(pct, msg):
+            if progress:
+                progress(pct, msg)
+
         if not shutil.which("adb"):
-            database.update_wipe_progress(wipe_id, 0, "FAILED", "0 MB/s", "ADB utility not installed")
-            return
+            raise RuntimeError("adb is not installed (Android platform-tools)")
+        before = next((d for d in self.probe_android_devices() if d["serialNumber"] == serial), None)
+        if not before or before.get("status") != "device":
+            raise RuntimeError("Device is not connected or not authorized for USB debugging")
+        result: Dict[str, Any] = {"serial": serial, "mode": mode, "device": before}
 
-        database.update_wipe_progress(wipe_id, 10, "IN_PROGRESS", "Connecting", f"Connecting to Android serial {serial}...")
-
-        try:
-            if mode == "master-clear":
-                database.update_wipe_progress(wipe_id, 40, "IN_PROGRESS", "Factory Reset", "Issuing Android Master Clear broadcast...")
-                res = subprocess.run(["adb", "-s", serial, "shell", "am", "broadcast", "-a", "android.intent.action.MASTER_CLEAR"], capture_output=True, text=True, timeout=30)
-                database.update_wipe_progress(wipe_id, 100, "COMPLETED", "Factory Reset Executed", "Android enterprise master clear broadcast completed")
-            elif mode == "fastboot-format":
-                database.update_wipe_progress(wipe_id, 40, "IN_PROGRESS", "Fastboot", "Rebooting to bootloader and formatting userdata...")
-                subprocess.run(["adb", "-s", serial, "reboot", "bootloader"], capture_output=True, timeout=30)
-                time.sleep(5)
-                subprocess.run(["fastboot", "-s", serial, "format", "userdata"], capture_output=True, timeout=60)
-                subprocess.run(["fastboot", "-s", serial, "format", "cache"], capture_output=True, timeout=60)
-                database.update_wipe_progress(wipe_id, 100, "COMPLETED", "Fastboot Format Executed", "Userdata and cache partitions formatted")
-        except Exception as e:
-            database.update_wipe_progress(wipe_id, 0, "FAILED", "0 MB/s", f"Android wipe error: {str(e)}")
+        if mode == "fastboot-wipe":
+            if not shutil.which("fastboot"):
+                raise RuntimeError("fastboot is not installed (Android platform-tools)")
+            step(10, "Rebooting to the bootloader")
+            subprocess.run(["adb", "-s", serial, "reboot", "bootloader"], capture_output=True, timeout=30)
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                fb = subprocess.run(["fastboot", "devices"], capture_output=True, text=True, timeout=10).stdout
+                if serial in fb:
+                    break
+                time.sleep(2)
+            else:
+                raise RuntimeError("Device did not appear in fastboot mode within 90 s")
+            unlocked = subprocess.run(["fastboot", "-s", serial, "getvar", "unlocked"],
+                                      capture_output=True, text=True, timeout=15)
+            if "unlocked: yes" not in (unlocked.stdout + unlocked.stderr).lower():
+                subprocess.run(["fastboot", "-s", serial, "reboot"], capture_output=True, timeout=30)
+                raise RuntimeError("Bootloader is locked, so fastboot -w is refused. Use the guided factory reset.")
+            step(40, "Erasing userdata, cache and metadata (fastboot -w)")
+            wipe = subprocess.run(["fastboot", "-s", serial, "-w"], capture_output=True, text=True, timeout=900)
+            result["fastbootOutput"] = (wipe.stdout + wipe.stderr).strip()[-2000:]
+            if wipe.returncode != 0:
+                raise RuntimeError("fastboot -w failed: " + result["fastbootOutput"][-300:])
+            subprocess.run(["fastboot", "-s", serial, "reboot"], capture_output=True, timeout=30)
+            result.update({"status": "COMPLETED", "verified": "fastboot reported success",
+                           "summary": "userdata, cache and metadata partitions erased with fastboot -w"})
+        elif mode == "guided-reset":
+            step(20, "Opening the factory-reset screen on the device")
+            opened = False
+            for comp in ("com.android.settings/.Settings$FactoryResetActivity", "com.android.settings/.MasterClear"):
+                r = subprocess.run(["adb", "-s", serial, "shell", "am", "start", "-n", comp],
+                                   capture_output=True, text=True, timeout=15)
+                if r.returncode == 0 and "Error" not in r.stdout + r.stderr:
+                    opened = True
+                    break
+            if not opened:
+                subprocess.run(["adb", "-s", serial, "shell", "am", "start", "-a", "android.settings.SETTINGS"],
+                               capture_output=True, timeout=15)
+            step(40, "Waiting for the operator to confirm Erase all data on the device")
+            deadline = time.time() + 1800
+            while time.time() < deadline:
+                present = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=10).stdout
+                if serial not in present:
+                    break                   # the device rebooted into the reset; USB debugging is off afterwards
+                time.sleep(3)
+            else:
+                raise RuntimeError("No reset observed within 30 minutes")
+            result.update({"status": "OPERATOR_CONFIRMED", "verified": "device left ADB after the reset was started",
+                           "summary": "Factory reset started from the device screen; completion confirmed by the operator"})
+        else:
+            raise ValueError("mode must be fastboot-wipe or guided-reset")
+        step(100, result["summary"])
+        return result
 
 
 if __name__ == "__main__":
     engine = WipeEngine()
-    devices = engine.probe_devices()
-    print(f"Discovered {len(devices)} physical storage device(s):")
-    for d in devices:
-        print(f"  [{d['healthStatus']}] {d['model']} — {d['capacity']} — {d['type']}")
-        print(f"    Serial: {d['serialNumber']} | Temp: {d['temperature']} | Hours: {d['powerOnHours']}")
-        print(f"    Recommended: {d['recommendedMethod']} → {d['expectedOutcome']}")
-
-    androids = engine.probe_android_devices()
-    print(f"\nDiscovered {len(androids)} Android device(s)")
-
+    for d in engine.probe_devices():
+        print(f"{d['model']} - {d['capacity']} - {d['type']} - health {d['healthStatus']}")
+    print(f"{len(engine.probe_android_devices())} Android device(s)")

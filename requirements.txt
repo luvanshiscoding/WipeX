@@ -1,10 +1,11 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
-requests>=2.31.0
-httpx>=0.28.0
-psycopg2-binary>=2.9.9
 cryptography>=42.0
 pytsk3>=20231007
 reportlab>=4.0
 Pillow>=10.0
+# test client used by tests/test_platform.py
+httpx>=0.28.0
+# Desktop window on Windows (python wipex.py --window, or double-click WipeX.cmd)
+pywebview>=5.0; sys_platform == "win32"

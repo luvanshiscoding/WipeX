@@ -1,5 +1,5 @@
 /** Overview: status of every module, readiness checks and recent activity. */
-import { ago, api, askOperator, badge, esc, getOperator, icon } from '../core.js';
+import { ago, api, badge, can, esc, icon, session } from '../core.js';
 
 const ACTIONS = {
   'erasure.started': 'Erasure started', 'erasure.finished': 'Erasure finished', 'erasure.blocked_by_hold': 'Erasure blocked by legal hold',
@@ -9,7 +9,10 @@ const ACTIONS = {
   'evidence.acquisition_started': 'Evidence acquisition started', 'evidence.acquired': 'Evidence acquired', 'evidence.hash_verified': 'Evidence hash verified',
   'evidence.hash_mismatch': 'Evidence hash MISMATCH', 'hold.placed': 'Legal hold placed', 'hold.released': 'Legal hold released',
   'settings.dual_approval': 'Two-person rule changed', 'lab_image.created': 'Lab image created', 'lab_image.reset': 'Lab image reset',
-  'history.cleared': 'History cleared',
+  'history.cleared': 'History cleared', 'user.login': 'Signed in', 'user.logout': 'Signed out',
+  'user.login_failed': 'Sign-in failed', 'user.created': 'User created', 'user.updated': 'User updated',
+  'user.password_changed': 'Password changed', 'audit.exported': 'Audit log exported',
+  'erasure.android_started': 'Phone erasure started', 'erasure.android_finished': 'Phone erasure finished',
 };
 export const actionLabel = (a) => ACTIONS[a] || a.replace(/[._]/g, ' ');
 
@@ -18,11 +21,11 @@ export async function show(el, _params, app) {
     <div class="page-head">
       <div>
         <h1 class="page-title">Overview</h1>
-        <p class="page-desc">One workstation to erase data beyond recovery and to recover deleted evidence — every action verified, signed and logged.</p>
+        <p class="page-desc">Recover deleted files, or destroy files so they can never be recovered. Every action is checked, signed and logged.</p>
       </div>
       <div class="row">
-        <a class="btn btn-secondary" href="#/recovery">${icon('recover')} Start recovery</a>
-        <a class="btn btn-primary" href="#/drive">${icon('drive')} New erasure job</a>
+        ${can('recovery.run') ? `<a class="btn btn-secondary" href="#/recovery">${icon('recover')} Recover files</a>` : ''}
+        ${can('files.erase') ? `<a class="btn btn-primary" href="#/files">${icon('fileX')} Delete files permanently</a>` : ''}
       </div>
     </div>
     <div id="ov-operator"></div>
@@ -34,13 +37,9 @@ export async function show(el, _params, app) {
     </div>`;
 
   renderModules(el.querySelector('#ov-modules'));
-  if (!getOperator()) {
-    el.querySelector('#ov-operator').innerHTML = `
-      <div class="notice" style="margin-bottom:16px">${icon('user', 18)}
-        <div><strong>Set the operator name</strong>Every erasure, acquisition and case change is signed into the audit log under this name.
-        <div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="ov-set-op">Set operator</button></div></div></div>`;
-    el.querySelector('#ov-set-op').addEventListener('click', async () => { await askOperator(); show(el, _params, app); });
-  }
+  const u = session.user;
+  el.querySelector('#ov-operator').innerHTML = u ? `<div class="notice" style="margin-bottom:16px">${icon('user', 18)}
+    <div><strong>Signed in as ${esc(u.displayName)} (${esc(u.roleLabel)})</strong>Your actions are recorded in the audit log and signed with your personal key ${esc(u.keyId)}.</div></div>` : '';
 
   const devicesPromise = api('/api/devices').catch(() => []);   // slowest call (hardware probe): fill its tile last
   const [sessions, jobs, cases, log, chain] = await Promise.all([
@@ -74,17 +73,18 @@ export async function show(el, _params, app) {
     const physical = devices.filter(d => !d.isImage).length;
     const images = devices.length - physical;
     const tile = el.querySelector('#ov-dev-kpi');
-    if (tile) tile.outerHTML = kpi('drive', 'Storage targets', devices.length, `${physical} physical · ${images} lab image${images === 1 ? '' : 's'}`);
+    if (tile) tile.outerHTML = kpi('drive', 'Storage targets', devices.length, `${physical} drive${physical === 1 ? '' : 's'} · ${images} sample disk${images === 1 ? '' : 's'}`);
   });
 
   const h = app.health;
   const ready = [
-    [!!h, 'Engine running', h ? `${h.platform} · ${h.database}` : 'Start: python -m uvicorn main:app --port 8000'],
+    [!!h, 'Engine running', h ? `${h.platform} · ${h.database}` : 'Start: python wipex.py'],
     [h?.capabilities?.signing, 'Signing key', h?.capabilities?.signing ? 'ECDSA P-256 certificates and audit entries' : 'Install the cryptography package'],
     [chain?.valid, 'Audit chain intact', chain ? (chain.valid ? `${chain.entries} entries verified` : `Broken at entry ${chain.brokenAt}`) : '—'],
     [h?.capabilities?.sleuthKit, 'The Sleuth Kit', h?.capabilities?.sleuthKit ? 'File-system recovery available' : 'Install pytsk3 for file-system recovery'],
     [h?.elevated, 'Administrator rights', h?.elevated ? 'Raw device access available' : 'Needed only for physical disks; lab images work without it', true],
-    [h?.capabilities?.hardwarePurge, 'Hardware purge commands', h?.capabilities?.hardwarePurge ? 'nvme-cli / hdparm path (Linux)' : 'Linux only; overwrite methods available here', true],
+    [!!h?.capabilities?.hardwarePurge, 'Firmware sanitize (Purge)', h?.capabilities?.hardwarePurge || 'Not available on this OS; use the Linux live USB', true],
+    [h?.capabilities?.e01, 'E01 evidence images', 'Read and write Expert Witness (E01) images', true],
   ];
   el.querySelector('#ov-ready').innerHTML = `<div class="stack" style="gap:10px">${ready.map(([ok, name, detail, optional]) => `
     <div class="row" style="align-items:flex-start;flex-wrap:nowrap">
@@ -99,18 +99,17 @@ function kpi(ic, label, value, foot) {
 
 function renderModules(el) {
   const mods = [
-    { href: '#/drive', ic: 'drive', code: 'M1', name: 'Secure Drive Eraser', desc: 'Sanitize a whole device and prove it.',
-      feats: ['NIST SP 800-88 Clear and Purge methods', 'Full read-back verification + canaries', 'Recovery attempt as final proof', 'Signed certificate with QR and PDF'] },
-    { href: '#/files', ic: 'fileX', code: 'M2', name: 'File & Folder Eraser', desc: 'Erase chosen files and the traces they leave.',
-      feats: ['In-place overwrite, rename, timestamp scrub', 'Alternate data streams removed', 'Recent-items shortcuts cleaned', 'Honest assurance for SSD / copy-on-write'] },
-    { href: '#/recovery', ic: 'recover', code: 'M3', name: 'Carving & Recovery', desc: 'Recover deleted files, even without a file system.',
-      feats: ['Deleted entries via The Sleuth Kit', 'Structure-validated carving (8 formats)', 'Fragment reassembly (PNG, ZIP)', 'Benchmark against ground truth'] },
+    { href: '#/recovery', ic: 'recover', name: 'Recover deleted files', desc: 'Get back files deleted from a drive, USB stick or disk image, even after a format.',
+      feats: ['Reads the drive without changing it', 'Finds deleted files by name and by content', 'Rebuilds split pictures and archives', 'Report with a fingerprint (SHA-256) of every file'] },
+    { href: '#/files', ic: 'fileX', name: 'Permanently delete files', desc: 'Destroy chosen files so they cannot be recovered or traced.',
+      feats: ['Overwrites the content before deleting', 'Removes names, hidden streams and Windows traces', 'Checks the drive afterwards to prove nothing is left', 'Honest warning on SSDs and flash drives'] },
+    { href: '#/drive', ic: 'drive', name: 'Erase a whole drive', desc: 'Wipe an entire disk or USB drive and prove it with a certificate.',
+      feats: ['NIST SP 800-88 methods, incl. drive firmware erase', 'Reads everything back after erasing', 'Tries to recover files as a final proof', 'Signed certificate with QR code and PDF'] },
   ];
   el.innerHTML = mods.map(m => `
     <a class="card module" href="${m.href}">
       <div class="module-top"><span class="module-icon">${icon(m.ic, 20)}</span>
-        <div><div class="module-name">${m.name}</div><div class="module-desc">${m.desc}</div></div>
-        <span class="spacer"></span>${badge(m.code, 'info')}</div>
+        <div><div class="module-name">${m.name}</div><div class="module-desc">${m.desc}</div></div></div>
       <ul class="module-feats">${m.feats.map(f => `<li>${f}</li>`).join('')}</ul>
       <span class="module-cta">Open ${icon('arrow', 14)}</span>
     </a>`).join('');
