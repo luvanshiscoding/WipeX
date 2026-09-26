@@ -191,7 +191,8 @@ const CONDITION = {
 
 /** One simple list: deleted files from the file system, plus files found only by the deep scan. */
 function foundFiles(r) {
-  const fsDeleted = (r.filesystem?.entries || []).filter(e => e.deleted && !e.isDir).map(e => ({
+  // Empty deleted entries (e.g. names left by a secure delete) hold nothing to recover
+  const fsDeleted = (r.filesystem?.entries || []).filter(e => e.deleted && !e.isDir && e.size > 0).map(e => ({
     name: e.name, where: e.path.slice(0, -e.name.length) || '/', size: e.size, when: e.modified,
     condition: e.contentStatus || 'unreadable', detail: e.detail, file: e.recoveredPath, how: 'File system',
   }));
@@ -219,9 +220,10 @@ function resultsCard() {
   const r = j.result;
   const files = foundFiles(r);
   const ok = files.filter(f => ['intact', 'unverified'].includes(f.condition) && f.file);
-  const headline = files.length
+  const empty = (r.filesystem?.entries || []).filter(e => e.deleted && !e.isDir && !(e.size > 0)).length;
+  const headline = (files.length
     ? `${files.length} deleted file${files.length === 1 ? '' : 's'} found · ${ok.length} recovered`
-    : 'No deleted files found';
+    : 'No deleted files found') + (empty ? ` · ${empty} empty entr${empty === 1 ? 'y' : 'ies'} ignored` : '');
   return `
     <div class="card">
       <div class="card-head">

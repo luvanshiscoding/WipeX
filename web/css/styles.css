@@ -400,3 +400,10 @@ details.more.card-like > .more-body { padding-top: 4px; }
 .choice.on { border-color: var(--primary); background: var(--primary-soft); }
 .verdict-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .verdict-list div { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+
+/* Access profile ("View as") */
+.operator-view { display: block; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; line-height: 1.1; }
+.operator-name { line-height: 1.15; text-align: left; }
+.access-tag { font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 4px 9px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .78); white-space: nowrap; }
+@media (max-width: 1100px) { .access-tag { display: none; } }

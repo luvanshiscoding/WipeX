@@ -352,9 +352,25 @@ function renderRun(body) {
         ${!running ? `<div class="card card-pad stack" style="gap:10px">
           <button class="btn btn-primary" id="run-cert">${icon('shield', 16)} ${st.status === 'COMPLETED' ? 'Issue certificate' : 'Issue failure report'}</button>
           <button class="btn btn-secondary" id="run-new">New job</button></div>` : ''}
+        ${!running && st.status === 'COMPLETED' && S.selected && !S.selected.isImage ? `<div class="card card-pad stack" style="gap:8px">
+          <div class="card-title">Use the drive again</div>
+          <div class="muted small">The erased drive has no partition left, so the computer shows it as unformatted. Create one empty file system to reuse it; the certificate is not affected.</div>
+          <div style="display:flex;gap:8px"><select class="select" id="run-fs">${['exFAT', 'FAT32', 'NTFS'].map(f => `<option>${f}</option>`).join('')}</select>
+            <button class="btn btn-secondary" id="run-format">${icon('drive', 16)} Format for reuse</button></div>
+          ${S.formatted ? `<div class="small">${esc(S.formatted)}</div>` : ''}</div>` : ''}
       </div>
     </div>`;
   body.querySelector('#run-cert')?.addEventListener('click', issueCertificate);
+  body.querySelector('#run-format')?.addEventListener('click', async (e) => {
+    const fs = body.querySelector('#run-fs').value;
+    e.target.disabled = true;
+    try {
+      const r = await api(`/api/wipe/${encodeURIComponent(S.wipeId)}/format`, { method: 'POST', body: { fileSystem: fs } });
+      S.formatted = `Formatted as ${r.fileSystem}${r.volume ? ` (${r.volume})` : ''}, label ${r.label}`;
+      toast(S.formatted, 'ok');
+      render();
+    } catch (err) { reportError(err); e.target.disabled = false; }
+  });
   body.querySelector('#run-new')?.addEventListener('click', resetFlow);
 }
 
@@ -367,7 +383,7 @@ async function issueCertificate() {
 }
 
 function resetFlow() {
-  S.step = 1; S.wipeId = null; S.status = null; S.cert = null; S.method = null; S.psid = '';
+  S.step = 1; S.wipeId = null; S.status = null; S.cert = null; S.method = null; S.psid = ''; S.formatted = '';
   loadDevices().then(render);
 }
 

@@ -6,7 +6,7 @@
 
 | Requirement | Status | Where |
 |---|---|---|
-| Runs as one local process: the backend serves the built UI | ✅ | `main.py` (serves `dist/`), `wipex.py` launcher |
+| Runs as one local process: the backend serves the built UI | ✅ | `engine/main.py` (serves `dist/`), `wipex.py` launcher |
 | No network at runtime: fonts bundled, no CDN, no telemetry | ✅ | `@fontsource` packages, `vite build` |
 | Local storage: single SQLite file, workspace folder, signing keys | ✅ | `store.py`, `database.py` |
 | Per-user data folder when packaged (install folder stays read-only) | ✅ | `paths.py` (`%LOCALAPPDATA%\WipeX`, `~/Library/Application Support/WipeX`, `~/.local/share/wipex`) |

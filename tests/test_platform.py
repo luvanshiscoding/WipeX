@@ -15,7 +15,7 @@ import unittest
 _TMP = tempfile.mkdtemp(prefix="wipex-tests-platform-")
 os.environ.setdefault("WIPEX_WORKSPACE", os.path.join(_TMP, "ws"))
 os.environ.setdefault("WIPEX_DB", os.path.join(_TMP, "wipex.db"))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine"))
 
 import audit_log  # noqa: E402
 import cases  # noqa: E402
@@ -100,10 +100,7 @@ class Api(unittest.TestCase):
         from fastapi.testclient import TestClient
         import main
         cls.c = TestClient(main.app)
-        if users.setup_required():
-            r = cls.c.post("/api/auth/setup", json={"username": "root", "password": PW})
-            assert r.status_code == 200, r.text
-        cls.admin = {"Authorization": "Bearer " + cls.c.post("/api/auth/login", json={"username": "root", "password": PW}).json()["token"]}
+        cls.admin = {"Authorization": "Bearer " + cls.c.post("/api/auth/profile", json={"profile": "admin"}).json()["token"]}
         for name, role in (("san", "sanitizer"), ("inv", "investigator"), ("aud", "auditor")):
             cls.c.post("/api/users", json={"username": name, "password": PW, "role": role}, headers=cls.admin)
         cls.tok = {n: {"Authorization": "Bearer " + cls.c.post("/api/auth/login", json={"username": n, "password": PW}).json()["token"]}
@@ -118,6 +115,24 @@ class Api(unittest.TestCase):
         self.assertEqual(self.c.get("/api/users", headers=self.tok["san"]).status_code, 403)
         self.assertEqual(self.c.get("/api/audit/verify", headers=self.tok["aud"]).status_code, 200)
         self.assertEqual(self.c.get("/api/cases", headers={"Host": "evil.example"}).status_code, 400)
+
+    def test_access_profiles_open_without_password_and_keep_roles(self):
+        profiles = self.c.get("/api/auth/profiles").json()
+        self.assertEqual([p["id"] for p in profiles], ["admin", "investigator", "sanitizer", "auditor"])
+        tok = {p["id"]: {"Authorization": "Bearer " + self.c.post("/api/auth/profile", json={"profile": p["id"]}).json()["token"]}
+               for p in profiles}
+        self.assertEqual(self.c.get("/api/cases", headers=tok["auditor"]).status_code, 200)
+        self.assertEqual(self.c.post("/api/cases", json={"title": "t"}, headers=tok["auditor"]).status_code, 403)
+        self.assertEqual(self.c.post("/api/files/analyze", json={"paths": []}, headers=tok["investigator"]).status_code, 403)
+        self.assertEqual(self.c.post("/api/auth/profile", json={"profile": "root"}).status_code, 404)
+        self.assertEqual(self.c.post("/api/auth/profile", json={"profile": "admin"}, headers={"Host": "evil.example"}).status_code, 400)
+        r = self.c.post("/api/cases", json={"title": "Profile case"}, headers=tok["investigator"])
+        self.assertEqual(r.json()["investigator"], "ntro.investigator")
+        entry = next(e for e in audit_log.entries(50) if e["action"] == "case.created" and e["target"] == r.json()["id"])
+        self.assertTrue(entry["actor_sig"])                              # still signed by the profile's own key
+        rec = users.approve("investigator", "", "ntro.sanitizer", "erase", "t")   # a second profile approves
+        self.assertTrue(users.verify_user_signature(rec["keyId"], rec["payload"], rec["signature"], "ntro.investigator"))
+        self.assertRaises(PermissionError, users.approve, "auditor", "", "ntro.sanitizer", "erase", "t")
 
     def test_case_created_by_signed_in_user_is_personally_signed(self):
         r = self.c.post("/api/cases", json={"title": "API case"}, headers=self.tok["inv"])

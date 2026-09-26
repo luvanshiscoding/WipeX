@@ -7,7 +7,7 @@ import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/ibm-plex-sans/700.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
-import { api, askOperator, can, esc, icon, onSessionEnded, renderOperator, session, setSession } from './core.js';
+import { api, askOperator, can, esc, icon, loadProfiles, onSessionEnded, openProfile, profiles, renderOperator, session, setSession } from './core.js';
 import * as overview from './views/overview.js';
 import * as drive from './views/drive.js';
 import * as files from './views/files.js';
@@ -42,7 +42,7 @@ function renderNav(active) {
 }
 
 async function route() {
-  if (!session.user) return showAuth();
+  if (!session.user) return;
   const { id, params } = parseHash();
   const r = allowed().find(x => x.id === id) || ROUTES[0];
   renderNav(r.id);
@@ -56,60 +56,42 @@ async function route() {
   }
 }
 
-// ── Sign-in / first-run setup ──────────────────────────────────────────────
-async function showAuth() {
+// ── Access profile (no sign-in page in the prototype) ─────────────────────────
+function showOffline() {
   const rootEl = document.getElementById('auth-root');
   document.body.classList.add('signed-out');
-  document.getElementById('nav').innerHTML = '';                       // never show the previous user's menu
-  document.querySelectorAll('.view').forEach(v => { v.innerHTML = ''; v.classList.remove('active'); });
-  let setup = false;
-  try { setup = (await api('/api/auth/state')).setupRequired; } catch { /* engine offline: show sign-in */ }
+  document.getElementById('nav').innerHTML = '';
   rootEl.innerHTML = `
-    <div class="auth-wrap">
-      <form class="auth-card" autocomplete="on">
-        <div class="brand auth-brand">
-          <span class="brand-mark">${icon('shield', 18, 2.2)}</span>
-          <span class="brand-name">WipeX</span>
-        </div>
-        <h1 class="auth-title">${setup ? 'Create the administrator account' : 'Sign in'}</h1>
-        <p class="auth-sub">${setup
-          ? 'First run on this workstation. The administrator adds investigator, sanitizer and auditor accounts afterwards.'
-          : 'Secure erasure and forensic recovery workstation. Every action is signed with your personal key.'}</p>
-        ${setup ? '<div class="field"><label for="au-display">Full name</label><input class="input" id="au-display" autocomplete="name"></div>' : ''}
-        <div class="field"><label for="au-user">Username</label><input class="input" id="au-user" autocomplete="username" required></div>
-        <div class="field"><label for="au-pass">Password${setup ? ' (8+ characters)' : ''}</label>
-          <input class="input" id="au-pass" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required></div>
-        <div class="auth-error" id="au-err" role="alert"></div>
-        <button class="btn btn-primary btn-lg" type="submit">${setup ? 'Create account and sign in' : 'Sign in'}</button>
-        <div class="muted small auth-foot">Runs locally · no network connection required</div>
-      </form>
-    </div>`;
-  const form = rootEl.querySelector('form');
-  form.querySelector('#au-user').focus();
-  form.addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const body = { username: form.querySelector('#au-user').value.trim(), password: form.querySelector('#au-pass').value };
-    if (setup) body.displayName = form.querySelector('#au-display').value.trim();
-    try {
-      const res = await api(setup ? '/api/auth/setup' : '/api/auth/login', { method: 'POST', body });
-      setSession(res.token, res.user);
-      rootEl.innerHTML = '';
-      document.body.classList.remove('signed-out');
-      await refreshHealth();
-      route();
-    } catch (e) {
-      form.querySelector('#au-err').textContent = e.message;
-    }
-  });
+    <div class="auth-wrap"><div class="auth-card">
+      <div class="brand auth-brand"><span class="brand-mark">${icon('shield', 18, 2.2)}</span><span class="brand-name">WipeX</span></div>
+      <h1 class="auth-title">The WipeX engine is not running</h1>
+      <p class="auth-sub">Start it on this workstation with <span class="mono">python wipex.py</span> (or double-click WipeX.cmd), then reload this page.</p>
+      <button class="btn btn-primary btn-lg" id="au-retry">Try again</button>
+    </div></div>`;
+  rootEl.querySelector('#au-retry').addEventListener('click', () => boot());
 }
 
-async function restoreSession() {
-  if (!session.token) return;
+async function openWorkstation() {
+  if (!profiles.length) await loadProfiles();
+  if (session.token) {
+    try {
+      const st = await api('/api/auth/state');
+      if (st.user) { setSession(session.token, st.user); return; }
+    } catch { /* token expired: open the profile again */ }
+  }
+  await openProfile();
+}
+
+async function boot() {
+  await refreshHealth();
   try {
-    const st = await api('/api/auth/state');
-    if (st.user) setSession(session.token, st.user);
-    else setSession('', null);
-  } catch { setSession('', null); }
+    await openWorkstation();
+  } catch {
+    return showOffline();
+  }
+  document.getElementById('auth-root').innerHTML = '';
+  document.body.classList.remove('signed-out');
+  route();
 }
 
 async function refreshHealth() {
@@ -127,7 +109,7 @@ async function refreshHealth() {
 
 document.getElementById('operator-chip').addEventListener('click', () => askOperator());
 window.addEventListener('hashchange', route);
-onSessionEnded(() => { showAuth(); });
+onSessionEnded((why) => { if (why === 'switched') route(); else boot(); });
 renderOperator();
-refreshHealth().then(restoreSession).then(route);
+boot();
 setInterval(refreshHealth, 20000);

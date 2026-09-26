@@ -2,7 +2,9 @@ import { defineConfig } from 'vite'
 
 // Development: Vite serves the UI on :5173 and proxies /api to the backend on :8000.
 // Production / offline: `npm run build` writes dist/, which the backend serves itself.
+// The UI source lives in web/.
 export default defineConfig({
+  root: 'web',
   server: {
     port: 5173,
     proxy: {
@@ -13,7 +15,7 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: 'dist',
+    outDir: '../dist',
     assetsDir: 'assets',
     emptyOutDir: true
   }

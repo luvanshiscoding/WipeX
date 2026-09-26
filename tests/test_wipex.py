@@ -15,7 +15,7 @@ import unittest
 _TMP = tempfile.mkdtemp(prefix="wipex-tests-")
 os.environ.setdefault("WIPEX_WORKSPACE", os.path.join(_TMP, "ws"))
 os.environ.setdefault("WIPEX_DB", os.path.join(_TMP, "wipex.db"))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine"))
 
 import database  # noqa: E402
 database.init_db()

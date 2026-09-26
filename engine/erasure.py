@@ -214,6 +214,43 @@ def _io_path(dev: Dict[str, Any]) -> str:
     return path
 
 
+_volume_locks: Dict[str, List[int]] = {}
+
+
+def _disk_letters(num: str) -> List[str]:
+    res = subprocess.run(["powershell", "-NoProfile", "-Command",
+                          f"(Get-Partition -DiskNumber {int(num)} -ErrorAction SilentlyContinue | "
+                          "Where-Object DriveLetter).DriveLetter -join ','"],
+                         capture_output=True, text=True, timeout=60)
+    return [x.strip() for x in res.stdout.strip().split(",") if x.strip()]
+
+
+def _lock_volumes(path: str, num: str) -> None:
+    """
+    USB sticks and memory cards often cannot be taken offline. Instead, lock and dismount every
+    volume on the disk (FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME) and hold the handles until the
+    erasure is finished, which is how raw-disk tools write to removable drives on Windows.
+    """
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    k32.CreateFileW.restype = wintypes.HANDLE
+    invalid = wintypes.HANDLE(-1).value
+    handles = []
+    for letter in _disk_letters(num):
+        h = k32.CreateFileW(f"\\\\.\\{letter}:", 0x80000000 | 0x40000000, 0x1 | 0x2, None, 3, 0, None)
+        got = wintypes.DWORD(0)
+        if h in (None, invalid) or not k32.DeviceIoControl(h, 0x00090018, None, 0, None, 0, ctypes.byref(got), None):
+            if h not in (None, invalid):
+                k32.CloseHandle(h)
+            for other in handles:
+                k32.CloseHandle(other)
+            raise PermissionError(f"Drive {letter}: is in use. Close any window or program using it and try again.")
+        k32.DeviceIoControl(h, 0x00090020, None, 0, None, 0, ctypes.byref(got), None)
+        handles.append(h)
+    _volume_locks[path] = handles
+
+
 def _prepare_physical(dev: Dict[str, Any]) -> None:
     """Release OS locks on a physical disk so raw writes succeed; raises with a clear reason."""
     path = dev["devicePath"]
@@ -223,9 +260,8 @@ def _prepare_physical(dev: Dict[str, Any]) -> None:
         res = subprocess.run(["powershell", "-NoProfile", "-Command",
                               f"Set-Disk -Number {num} -IsOffline $true -ErrorAction Stop"],
                              capture_output=True, text=True, timeout=60)
-        if res.returncode != 0:
-            raise PermissionError("Could not take the disk offline. Run WipeX as Administrator. "
-                                  + res.stderr.strip()[:200])
+        if res.returncode != 0:                      # typical for USB sticks: lock the volumes instead
+            _lock_volumes(path, num)
     elif system == "Linux":
         for mp in dev.get("mountedPaths") or []:
             subprocess.run(["umount", "-f", mp], capture_output=True, timeout=30)
@@ -236,6 +272,9 @@ def _prepare_physical(dev: Dict[str, Any]) -> None:
 def _restore_physical(dev: Dict[str, Any]) -> None:
     path = dev["devicePath"]
     if platform.system() == "Windows" and path.startswith("\\\\.\\PhysicalDrive"):
+        import ctypes
+        for h in _volume_locks.pop(path, []):
+            ctypes.windll.kernel32.CloseHandle(h)
         num = path.replace("\\\\.\\PhysicalDrive", "")
         subprocess.run(["powershell", "-NoProfile", "-Command", f"Set-Disk -Number {num} -IsOffline $false"],
                        capture_output=True, timeout=60)
@@ -517,6 +556,67 @@ def get(wipe_id: str) -> Optional[Dict[str, Any]]:
     for k in ("device", "execution", "verification", "approval"):
         row[k] = json.loads(row[k]) if row.get(k) else None
     return row
+
+
+# ── Reuse after erasure ──────────────────────────────────────────────────────
+
+REUSE_FILESYSTEMS = ("exFAT", "FAT32", "NTFS")
+
+
+def format_for_reuse(wipe_id: str, fs: str, actor: str) -> Dict[str, Any]:
+    """
+    After a completed erasure the drive holds no partition table, so the operating system shows it
+    as unformatted. Create one partition and an empty file system so the stick can be used again.
+    """
+    er = get(wipe_id)
+    if not er:
+        raise LookupError(wipe_id)
+    if er["status"] != "COMPLETED":
+        raise ValueError("Only a drive whose erasure completed can be formatted for reuse")
+    if fs not in REUSE_FILESYSTEMS:
+        raise ValueError(f"File system must be one of {', '.join(REUSE_FILESYSTEMS)}")
+    dev = er["device"] or {}
+    path = dev.get("devicePath", "")
+    if dev.get("isImage") or not path:
+        raise ValueError("Lab disk images do not need formatting")
+    if dev.get("isBootDrive"):
+        raise PermissionError("Refusing to touch the system disk")
+    system = platform.system()
+    label = "WIPEX"
+    if system == "Windows" and path.startswith("\\\\.\\PhysicalDrive"):
+        num = int(path.replace("\\\\.\\PhysicalDrive", ""))
+        ps = (f"$ErrorActionPreference='Stop'; $d = Get-Disk -Number {num}; "
+              "if ($d.IsOffline) { Set-Disk -Number $d.Number -IsOffline $false }; "
+              "if ($d.IsReadOnly) { Set-Disk -Number $d.Number -IsReadOnly $false }; "
+              "if ($d.PartitionStyle -eq 'RAW') { Initialize-Disk -Number $d.Number -PartitionStyle MBR }; "
+              f"$v = New-Partition -DiskNumber {num} -UseMaximumSize -AssignDriveLetter | "
+              f"Format-Volume -FileSystem {fs} -NewFileSystemLabel {label} -Confirm:$false; "
+              "$v.DriveLetter")
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=600)
+        where = res.stdout.strip().splitlines()[-1] + ":" if res.returncode == 0 and res.stdout.strip() else ""
+    elif system == "Linux":
+        mkfs = {"exFAT": ["mkfs.exfat", "-L", label], "FAT32": ["mkfs.vfat", "-F", "32", "-n", label],
+                "NTFS": ["mkfs.ntfs", "-Q", "-L", label]}[fs]
+        part = path + ("p1" if path[-1].isdigit() else "1")
+        steps = [["parted", "-s", path, "mklabel", "msdos", "mkpart", "primary", "1MiB", "100%"],
+                 ["partprobe", path], mkfs + [part]]
+        res = None
+        for cmd in steps:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if res.returncode != 0:
+                break
+        where = part
+    elif system == "Darwin":
+        res = subprocess.run(["diskutil", "eraseDisk", {"exFAT": "ExFAT", "FAT32": "MS-DOS FAT32", "NTFS": "ExFAT"}[fs],
+                              label, "MBR", path], capture_output=True, text=True, timeout=600)
+        where = path
+    else:
+        raise ValueError(f"Formatting is not supported on {system}")
+    if res is None or res.returncode != 0:
+        raise RuntimeError("Formatting failed: " + ((res.stderr or res.stdout).strip()[:300] if res else "no command ran"))
+    audit_log.append("erasure.formatted_for_reuse", actor, target=path, details={"wipeId": wipe_id, "fileSystem": fs,
+                                                                                  "volume": where})
+    return {"wipeId": wipe_id, "fileSystem": fs, "volume": where, "label": label}
 
 
 # ── Certificates ─────────────────────────────────────────────────────────────

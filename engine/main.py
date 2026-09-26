@@ -62,6 +62,7 @@ store.init()
 database.init_db()
 erasure._init_tables()
 users.init()
+users.ensure_profiles()                         # NTRO access profiles: the workstation opens without a sign-in page
 
 
 def _startup_images():
@@ -121,7 +122,7 @@ def _approval(operator: str, approver: str, password: str, action: str, target: 
     """Two-person rule: required when enabled, verified whenever an approver is supplied."""
     if not approver:
         if cases.dual_approval_required():
-            raise PermissionError("Two-person rule is on: an approver must sign in to approve this erasure")
+            raise PermissionError("Two-person rule is on: a second person (another profile) must approve this erasure")
         return None
     return users.approve(approver, password, operator, action, target)
 
@@ -135,6 +136,10 @@ class SetupRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ProfileRequest(BaseModel):
+    profile: str
 
 
 class PasswordRequest(BaseModel):
@@ -161,6 +166,21 @@ def auth_state(request: Request):
     sess = users.session_for(header[7:].strip()) if header.lower().startswith("bearer ") else None
     user = next((u for u in users.list_users() if sess and u["id"] == sess["userId"]), None)
     return {"setupRequired": users.setup_required(), "user": user}
+
+
+@app.get("/api/auth/profiles")
+def auth_profiles():
+    """The NTRO access profiles this workstation opens into (no sign-in page in the prototype)."""
+    return users.list_profiles()
+
+
+@app.post("/api/auth/profile")
+def auth_profile(req: ProfileRequest):
+    """Open an access profile. Requests are accepted from this workstation only (see the host check)."""
+    try:
+        return users.profile_login(req.profile)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @app.post("/api/auth/setup")
@@ -317,6 +337,21 @@ def start_wipe(req: WipeStartRequest, background_tasks: BackgroundTasks, sess=De
         _fail(exc)
     background_tasks.add_task(erasure.run, started["wipeId"])
     return {**started, "status": "IN_PROGRESS"}
+
+
+class ReuseRequest(BaseModel):
+    fileSystem: str = "exFAT"
+
+
+@app.post("/api/wipe/{wipe_id}/format")
+def format_for_reuse(wipe_id: str, req: ReuseRequest, sess=Depends(need("erasure.run"))):
+    """After a completed erasure: one partition and an empty file system so the drive can be used again."""
+    try:
+        return erasure.format_for_reuse(wipe_id, req.fileSystem, sess["username"])
+    except LookupError:
+        raise HTTPException(404, "Wipe ID not found")
+    except Exception as exc:  # noqa: BLE001
+        _fail(exc)
 
 
 @app.get("/api/wipe/status/{wipe_id}")

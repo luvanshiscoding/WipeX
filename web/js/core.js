@@ -206,11 +206,12 @@ export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLa
       ${extra}
       ${approval ? `<div class="approval-box">
         <div class="label">Approver ${approval === 'required' ? '(two-person rule: required)' : '(optional)'}</div>
-        <div class="hint">A second user with approval rights signs in here. Their approval is signed with their own key.</div>
-        <div class="grid cols-2" style="gap:10px;margin-top:8px">
-          <input class="input" id="ap-user" placeholder="Approver username" autocomplete="off">
-          <input class="input" id="ap-pass" type="password" placeholder="Approver password" autocomplete="off">
-        </div></div>` : ''}
+        <div class="hint">A second person with approval rights approves here. The approval is signed with their own key.</div>
+        <select class="select" id="ap-user" style="margin-top:8px">
+          <option value="">Choose the approving profile…</option>
+          ${profiles.filter(p => ['admin', 'investigator'].includes(p.role) && p.username !== session.user?.username)
+            .map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}
+        </select></div>` : ''}
       <div class="field">
         <label for="confirm-word">Type <b>${word}</b> to confirm</label>
         <input class="input mono" id="confirm-word" autocomplete="off" spellcheck="false">
@@ -224,57 +225,78 @@ export function confirmDanger({ title, sub, rows = [], word = 'ERASE', confirmLa
           return false;
         }
         if (!approval) return true;
-        const approver = bd.querySelector('#ap-user').value.trim();
-        const approverPassword = bd.querySelector('#ap-pass').value;
-        if (approval === 'required' && (!approver || !approverPassword)) {
-          toast('The two-person rule is on: the approver must sign in', 'bad');
+        const approver = bd.querySelector('#ap-user').value;
+        if (approval === 'required' && !approver) {
+          toast('The two-person rule is on: choose the approving profile', 'bad');
           return false;
         }
-        return { approver, approverPassword };
+        return { approver, approverPassword: '' };
       } },
     ],
   });
 }
 
-// ── Signed-in user ─────────────────────────────────────────────────────────
+// ── Access profile ("View as") ──────────────────────────────────────────────
+const PROFILE_KEY = 'wipex_profile';
+export const profiles = [];
+
 export function getOperator() { return session.user?.username || ''; }
+
+export async function loadProfiles() {
+  const list = await api('/api/auth/profiles');
+  profiles.splice(0, profiles.length, ...list);
+  return profiles;
+}
+
+/** Open an NTRO access profile (no password in the prototype; the engine only serves this workstation). */
+export async function openProfile(id) {
+  let wanted = id;
+  if (!wanted) { try { wanted = localStorage.getItem(PROFILE_KEY) || ''; } catch { /* storage unavailable */ } }
+  const res = await api('/api/auth/profile', { method: 'POST', body: { profile: wanted || 'admin' } })
+    .catch(() => api('/api/auth/profile', { method: 'POST', body: { profile: 'admin' } }));
+  setSession(res.token, res.user);
+  const current = profiles.find(p => p.username === res.user.username);
+  try { if (current) localStorage.setItem(PROFILE_KEY, current.id); } catch { /* storage unavailable */ }
+  return res.user;
+}
 
 export function renderOperator() {
   const u = session.user;
   const nameEl = document.getElementById('operator-name');
   const avatarEl = document.getElementById('operator-avatar');
   if (!nameEl || !avatarEl) return;
-  nameEl.textContent = u ? u.displayName : 'Not signed in';
-  nameEl.parentElement.title = u ? `${u.displayName} (${u.roleLabel}): account and sign out` : '';
-  avatarEl.textContent = u ? u.displayName.split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() : '?';
+  nameEl.innerHTML = u ? `<span class="operator-view">View as</span>${esc(u.displayName)}` : 'Opening…';
+  nameEl.parentElement.title = u ? `${u.displayName} (${u.roleLabel}). Switch the access profile` : '';
+  avatarEl.textContent = u ? u.displayName.replace(/^NTRO\s+/, '').split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() : '·';
 }
 
-/** Account menu: change password or sign out. */
+const PROFILE_NOTES = {
+  admin: 'Every module, users and settings',
+  investigator: 'Cases, evidence, recovery, legal holds; approves erasures',
+  sanitizer: 'Drive and file erasure, certificates',
+  auditor: 'Read-only: cases, audit log, reports, certificates',
+};
+
+/** "View as" menu: switch between the NTRO access profiles. */
 export async function askOperator() {
   const u = session.user;
-  if (!u) return '';
+  const options = profiles.map(p => `
+    <label class="choice ${u && p.username === u.username ? 'on' : ''}" style="margin-bottom:8px">
+      <input type="radio" name="pf" value="${esc(p.id)}" ${u && p.username === u.username ? 'checked' : ''}>
+      <b>${esc(p.name)}</b><span>${esc(PROFILE_NOTES[p.id] || p.roleLabel)}</span></label>`).join('');
   const choice = await modal({
-    title: u.displayName,
-    sub: `${esc(u.username)} · ${esc(u.roleLabel)} · personal signing key <span class="mono">${esc(u.keyId)}</span>`,
-    body: `<p class="small" style="color:var(--text-2)">Actions you take are recorded in the audit log and signed with your personal key as well as the workstation key.</p>`,
-    actions: [{ label: 'Close', value: null }, { label: 'Change password', value: 'password' }, { label: 'Sign out', cls: 'btn-primary', value: 'out' }],
+    title: 'View WipeX as',
+    sub: 'Controlled access for NTRO: profiles open only on this workstation, and every action is recorded and signed with the profile’s own key.',
+    body: options,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Switch profile', cls: 'btn-primary',
+      onClick: bd => bd.querySelector('input[name=pf]:checked')?.value || null }],
   });
-  if (choice === 'out') {
-    try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* already signed out */ }
-    setSession('', null);
-    onSignedOut && onSignedOut();
-  } else if (choice === 'password') {
-    const res = await modal({
-      title: 'Change password',
-      body: `
-        <div class="field"><label for="pw-old">Current password</label><input class="input" id="pw-old" type="password" autocomplete="current-password"></div>
-        <div class="field"><label for="pw-new">New password (8+ characters)</label><input class="input" id="pw-new" type="password" autocomplete="new-password"></div>`,
-      actions: [{ label: 'Cancel', value: null }, { label: 'Change', cls: 'btn-primary', onClick: bd => ({
-        oldPassword: bd.querySelector('#pw-old').value, newPassword: bd.querySelector('#pw-new').value }) }],
-    });
-    if (res) {
-      try { await api('/api/auth/password', { method: 'POST', body: res }); toast('Password changed', 'ok'); } catch (e) { reportError(e); }
-    }
+  if (choice && (!u || profiles.find(p => p.id === choice)?.username !== u.username)) {
+    try {
+      await openProfile(choice);
+      toast(`Now viewing as ${session.user.displayName}`, 'ok');
+      onSignedOut && onSignedOut('switched');
+    } catch (e) { reportError(e); }
   }
   return getOperator();
 }

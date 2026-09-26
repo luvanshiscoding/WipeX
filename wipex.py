@@ -48,7 +48,7 @@ def main() -> int:
     args = parser.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, here)
+    sys.path.insert(0, os.path.join(here, "engine"))
     import uvicorn
     import paths
     from main import app

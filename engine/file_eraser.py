@@ -63,7 +63,7 @@ _media_cache: Dict[str, Dict[str, Any]] = {}
 # ── Safety ───────────────────────────────────────────────────────────────────
 
 def _protected_roots() -> List[str]:
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the WipeX folder itself
     roots = [here]
     if SYSTEM == "Windows":
         sysdrive = os.environ.get("SystemDrive", "C:") + "\\"

@@ -330,12 +330,74 @@ def verify_user_signature(key_id: str, payload: str, signature_b64: str, expecte
         return False
 
 
+# ── Access profiles (prototype: no sign-in page) ────────────────────────────
+#
+# The workstation opens straight into one of four NTRO access profiles. Each profile is a real
+# account with its own role and personal signing key; its secret is derived from the workstation
+# signing key, so a profile can only be opened by the WipeX engine on this workstation (the API
+# accepts local requests only). Named accounts with passwords remain available through the API.
+
+PROFILES: List[Dict[str, str]] = [
+    {"id": "admin", "role": "admin", "username": "ntro.admin", "name": "NTRO Lab Administrator"},
+    {"id": "investigator", "role": "investigator", "username": "ntro.investigator", "name": "NTRO Forensic Investigator"},
+    {"id": "sanitizer", "role": "sanitizer", "username": "ntro.sanitizer", "name": "NTRO Sanitization Officer"},
+    {"id": "auditor", "role": "auditor", "username": "ntro.auditor", "name": "NTRO Auditor"},
+]
+
+
+def _profile(ident: str) -> Optional[Dict[str, str]]:
+    ident = (ident or "").lower()
+    return next((p for p in PROFILES if ident in (p["id"], p["username"])), None)
+
+
+def _profile_secret(username: str) -> str:
+    from crypto_signer import CryptoSigner
+    CryptoSigner._init_keys()
+    pem = CryptoSigner._private_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                  serialization.NoEncryption())
+    return hmac.new(pem, b"wipex-profile|" + username.encode(), hashlib.sha256).hexdigest()
+
+
+def ensure_profiles() -> None:
+    """Create the access profiles on first run; re-key one if the workstation key changed."""
+    init()
+    for p in PROFILES:
+        secret = _profile_secret(p["username"])
+        u = get_user(p["username"])
+        if not u:
+            create_user(p["username"], secret, p["role"], p["name"])
+        elif not _verify_pw(u, secret) or u["role"] != p["role"] or not u["active"]:
+            update_user(p["username"], "system", role=p["role"], active=True, new_password=secret)
+
+
+def list_profiles() -> List[Dict[str, Any]]:
+    return [{"id": p["id"], "name": p["name"], "username": p["username"], "role": p["role"],
+             "roleLabel": ROLES[p["role"]]["label"], "permissions": sorted(ROLES[p["role"]]["perms"])} for p in PROFILES]
+
+
+def profile_login(ident: str) -> Dict[str, Any]:
+    p = _profile(ident)
+    if not p:
+        raise ValueError("Unknown access profile")
+    if not get_user(p["username"]):
+        ensure_profiles()
+    try:
+        return login(p["username"], _profile_secret(p["username"]))
+    except PermissionError:
+        ensure_profiles()
+        return login(p["username"], _profile_secret(p["username"]))
+
+
 def approve(approver: str, password: str, operator: str, action: str, target: str) -> Dict[str, Any]:
     """
     Two-person rule: the approver authenticates with their own password (not just a typed
     name), must hold erasure.approve, and must be a different person from the operator.
-    Returns a signed approval record that is stored with the erasure.
+    Returns a signed approval record that is stored with the erasure. An access profile approves
+    without a password: it is opened on this workstation like the operator's own profile.
     """
+    profile = _profile(approver)
+    if profile and not password:
+        approver, password = profile["username"], _profile_secret(profile["username"])
     u = authenticate(approver, password)
     if u["username"].lower() == (operator or "").lower():
         raise PermissionError("Two-person rule: the approver must be a different user")
