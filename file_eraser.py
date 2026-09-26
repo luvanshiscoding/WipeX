@@ -14,6 +14,13 @@ much assurance an in-place overwrite gives there:
   * SSD / flash               -> Limited (wear-levelling and spare blocks); M1 Purge advised
   * APFS / Btrfs / ReFS / ZFS -> Not effective (copy-on-write writes new blocks)
 
+Directory entries: FAT and exFAT keep a deleted file's name in its directory slots, so after
+the renames WipeX creates and removes short-lived placeholder files that take over those slots.
+
+Trace check: afterwards WipeX reads each folder straight from the volume with The Sleuth Kit,
+as an examiner would, and looks for the original names and content (live and deleted entries,
+including inside deleted subfolders). On Windows it also searches the NTFS change journal.
+
 Trace cleanup: after erasure WipeX removes OS artefacts that reveal the file existed:
   Windows  Recent shortcuts (.lnk) and Jump List files that reference the file
            (the application's recent list is rebuilt by Windows); thumbcache is reported.
@@ -30,11 +37,12 @@ import platform
 import re
 import secrets
 import shutil
+import stat
 import string
 import struct
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import audit_log
@@ -78,7 +86,7 @@ def check_path_allowed(path: str) -> Optional[str]:
     workspace = os.path.normcase(os.path.abspath(store.WORKSPACE))
     if ap == workspace or ap.startswith(workspace + os.sep):
         return None                                   # WipeX sandbox is always allowed
-    if ap in exact:
+    if ap in exact or os.path.ismount(ap):
         return "Refusing to erase a drive root, home folder or top-level system folder"
     for r in roots:
         if ap == r or ap.startswith(r + os.sep):
@@ -606,6 +614,62 @@ def _erase_one(path: str, passes: List[Any]) -> Dict[str, Any]:
     return info
 
 
+def _placeholders(folder: str, lengths: List[int]) -> int:
+    """Create empty files with random names of the given lengths in folder, then remove them all."""
+    made = []
+    try:
+        for n in lengths:
+            path = os.path.join(folder, _random_name(n))
+            try:
+                with open(path, "xb"):
+                    pass
+                made.append(path)
+            except OSError:
+                continue
+    finally:
+        for path in made:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return len(made)
+
+
+def _raw_location(folder: str) -> Tuple[Optional[str], str, str]:
+    """(raw device, folder path inside the volume, volume root); device is None when it cannot be read raw."""
+    folder = os.path.realpath(folder)
+    root = _volume_root(folder)
+    device, why = _volume_device(root)
+    rel = "/" + folder[len(root):].replace("\\", "/").strip("/")
+    return device, (rel if device else why), root
+
+
+def _scrub_slots(folder: str, names: List[str], raw: bool) -> int:
+    """
+    Take over the directory slots that held erased names. FAT and exFAT keep a deleted name in its slots
+    until a new entry reuses them, and they hand out the first free slots that fit. WipeX creates and removes
+    placeholder files: four per erased name with the same length, plus one-slot names. With raw access
+    (Administrator / root) it then reads the folder back and adds placeholders in growing batches until no
+    deleted entry in the folder carries an erased name. Returns how many placeholders were used.
+    """
+    if not names or not os.path.isdir(folder):
+        return 0
+    used = _placeholders(folder, ([len(n) for n in names for _ in range(4)] + [8] * 16)[:2000])
+    if not raw:
+        return used
+    from recovery import fs_recovery
+    device, rel, root = _raw_location(folder)
+    if not device:
+        return used
+    for batch in (64, 256, 1024, 4096):
+        _flush_volume(root)
+        res = fs_recovery.dir_traces(device, rel, names, set(), depth=0)
+        if not res.get("checked") or not res.get("namesFound"):
+            break
+        used += _placeholders(folder, [8] * batch)
+    return used
+
+
 def analyze(paths: List[str]) -> Dict[str, Any]:
     items, volumes, blocked = [], {}, []
     trace_files: List[str] = []
@@ -679,13 +743,24 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
             failures.append({"path": fp, "error": str(exc)})
         if progress:
             progress(int((i + 1) * 85 / max(1, len(files))), f"Erased {i + 1} of {len(files)} files")
+    raw = _is_admin()
+    erased_names: Dict[str, List[str]] = {}
+    for fp in files:
+        erased_names.setdefault(os.path.dirname(os.path.abspath(fp)), []).append(os.path.basename(fp))
+    slots = 0
     for d in dirs:                                   # deepest first
         try:
+            slots += _scrub_slots(d, erased_names.pop(os.path.abspath(d), []), raw)
             tmp = os.path.join(os.path.dirname(d), _random_name(len(os.path.basename(d))))
             os.replace(d, tmp)
             os.rmdir(tmp)
+            erased_names.setdefault(os.path.dirname(os.path.abspath(d)), []).append(os.path.basename(d))
         except OSError as exc:
             failures.append({"path": d, "error": str(exc)})
+    if progress:
+        progress(87, "Reusing the directory entries that held the names")
+    for folder, names in erased_names.items():       # folders that remain: the parents of what was erased
+        slots += _scrub_slots(folder, names, raw)
 
     trace_results = clean_traces(pre["traces"]) if clean else []
     journal_results = []
@@ -706,8 +781,10 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
         "xattrsErased": sum(len(r.get("xattrs", [])) for r in results),
         "bytesOverwritten": sum(r["size"] for r in results),
         "traces": trace_results, "volumes": pre["volumes"], "journal": journal_results, "traceCheck": trace_check,
+        "directorySlotsReused": slots,
         "verdict": ("PARTIAL" if failures or not all(r["verified"] for r in results)
-                    else "TRACES_REMAIN" if trace_check.get("tracesFound") else "PASS"),
+                    else "TRACES_REMAIN" if trace_check.get("tracesFound")
+                    else "PASS" if trace_check.get("checked") else "ERASED_UNVERIFIED"),
         "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     report["summary"] = (f"{len(results)} files erased ({report['bytesOverwritten']:,} bytes, {report['passes']} pass(es)), "
@@ -728,7 +805,7 @@ def _fingerprint(paths: List[str]) -> Dict[str, Any]:
     """Names and content hashes of everything about to be erased, grouped by volume and folder."""
     groups: Dict[str, Dict[str, Any]] = {}
     for p in paths:
-        ap = os.path.abspath(p)
+        ap = os.path.realpath(os.path.abspath(p))        # long names: raw readers do not know 8.3 aliases
         root = _volume_root(ap)
         folder = os.path.dirname(ap)
         g = groups.setdefault(folder, {"volume": root, "folder": folder, "names": [], "hashes": set()})
@@ -750,17 +827,17 @@ def _is_admin() -> bool:
 
 
 def _linux_device(mount_point: str) -> Optional[str]:
-    """Return the block device path for a Linux mount point (e.g. /dev/sda2)."""
+    """Block device behind a Linux mount point (e.g. /dev/sda2)."""
     try:
         out = subprocess.run(["findmnt", "-no", "SOURCE", mount_point],
                              capture_output=True, text=True, timeout=10).stdout.strip()
-        return out.split("[", 1)[0] or None  # btrfs: /dev/sda2[/@home] -> /dev/sda2
+        return out.split("[", 1)[0] or None              # btrfs: /dev/sda2[/@home] -> /dev/sda2
     except (OSError, subprocess.SubprocessError):
         return None
 
 
 def _macos_device(mount_point: str) -> Optional[str]:
-    """Return the BSD device node for a macOS mount point (e.g. /dev/disk2s1)."""
+    """BSD device node behind a macOS mount point (e.g. /dev/disk2s1)."""
     try:
         out = subprocess.run(["diskutil", "info", mount_point],
                              capture_output=True, text=True, timeout=10).stdout
@@ -770,54 +847,86 @@ def _macos_device(mount_point: str) -> Optional[str]:
         return None
 
 
+_TSK_UNREADABLE = {"APFS", "BTRFS", "ZFS", "REFS", "BCACHEFS"}
+
+
+def _volume_device(root: str) -> Tuple[Optional[str], str]:
+    """Raw device of the volume mounted at root, or (None, why it cannot be read)."""
+    fs = _fs_type(root)
+    if fs in _TSK_UNREADABLE:
+        return None, f"{fs} volumes cannot be read directly by The Sleuth Kit (copy-on-write; see the storage assessment)"
+    if SYSTEM == "Windows":
+        letter = _volume_letter(root)
+        return ("\\\\.\\" + letter, "") if letter else (None, "not on a drive letter")
+    dev = _linux_device(root) if SYSTEM == "Linux" else _macos_device(root) if SYSTEM == "Darwin" else None
+    try:
+        if dev and stat.S_ISBLK(os.stat(dev).st_mode):
+            return dev, ""
+    except OSError:
+        pass
+    return None, "the folder is not on a local disk (network, memory or container file system)"
+
+
+def _flush_volume(root: str) -> None:
+    """Write cached file-system metadata to the disk so the raw read sees the result of the erasure."""
+    if SYSTEM != "Windows":
+        os.sync()
+        return
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    k32.CreateFileW.restype = wintypes.HANDLE
+    handle = k32.CreateFileW("\\\\.\\" + _volume_letter(root), 0x80000000 | 0x40000000, 0x1 | 0x2, None, 3, 0, None)
+    if handle not in (None, wintypes.HANDLE(-1).value):
+        k32.FlushFileBuffers(handle)
+        k32.CloseHandle(handle)
+
+
 def verify_no_traces(groups: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Read each erased folder directly from the volume with The Sleuth Kit to check whether
-    the original names or content can still be found. On Windows also searches the NTFS
-    change journal. Works on Windows (Administrator), Linux (root) and macOS (root).
+    Look for the erased files the way a forensic examiner would: read the folders straight from the volume
+    (live and deleted entries, including deleted subfolders) for the original names or content, and on
+    Windows search the NTFS change journal for the names. Needs Administrator (Windows) or root.
     """
     if not _is_admin():
-        msg = ("Trace check needs WipeX to run as Administrator" if SYSTEM == "Windows"
-               else "Trace check needs WipeX to run as root (sudo wipex.py ...)")
-        return {"checked": False, "summary": msg}
+        return {"checked": False, "summary": "Drive check needs WipeX to run as Administrator" if SYSTEM == "Windows"
+                else "Drive check needs WipeX to run as root (sudo)"}
     from recovery import fs_recovery
-    checks, names_found, content_found, journal_hits = [], [], [], 0
-    journals: Dict[str, Any] = {}
-    for g in groups.values():
-        if SYSTEM == "Windows":
-            letter = _volume_letter(g["volume"])
-            if not letter:
-                continue
-            device = "\\\\.\\" + letter
-            rel = g["folder"][len(g["volume"]):].replace("\\", "/")
-        elif SYSTEM == "Linux":
-            device = _linux_device(g["volume"])
-            if not device:
-                continue
-            rel = g["folder"][len(g["volume"]):]
-        elif SYSTEM == "Darwin":
-            device = _macos_device(g["volume"])
-            if not device:
-                continue
-            rel = g["folder"][len(g["volume"]):]
-        else:
+    targets: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for g in groups.values():                        # erased folders are gone: check from the nearest one left
+        folder = g["folder"]
+        while not os.path.isdir(folder) and os.path.dirname(folder) != folder:
+            folder = os.path.dirname(folder)
+        t = targets.setdefault((g["volume"], folder), {"names": set(), "hashes": set()})
+        t["names"].update(g["names"])
+        t["hashes"].update(g["hashes"])
+    checks, skipped, names_found, content_found = [], [], [], []
+    devices: Dict[str, Tuple[Optional[str], str]] = {}
+    for (volume, folder), t in targets.items():
+        if volume not in devices:
+            devices[volume] = _volume_device(volume)
+            if devices[volume][0]:
+                _flush_volume(volume)
+        device, why = devices[volume]
+        if not device:
+            skipped.append({"folder": folder, "reason": why})
             continue
-        res = fs_recovery.dir_traces(device, "/" + rel.strip("/"), g["names"], g["hashes"])
-        checks.append({"folder": g["folder"], **res})
+        rel = "/" + os.path.realpath(folder)[len(volume):].replace("\\", "/").strip("/")
+        res = fs_recovery.dir_traces(device, rel, sorted(t["names"]), t["hashes"])
+        if not res.get("checked"):
+            skipped.append({"folder": folder, "reason": res.get("reason", "could not be read")})
+            continue
+        checks.append({"folder": folder, **res})
         names_found += res.get("namesFound", [])
         content_found += res.get("contentFound", [])
-        if SYSTEM == "Windows":
-            journals.setdefault(g["volume"], []).extend(g["names"])
-    journal = []
-    if SYSTEM == "Windows":
-        for vol, names in journals.items():
-            hits = journal_names_found(vol, names)
-            journal.append({"volume": vol, "recordsWithNames": hits})
-            journal_hits += hits or 0
+    journal, journal_hits = [], 0
+    for volume in {v for v, _ in targets} if SYSTEM == "Windows" else ():
+        names = sorted({n for (v, _), t in targets.items() if v == volume for n in t["names"]})
+        hits = journal_names_found(volume, names)
+        if hits is not None:                         # only NTFS volumes with an active journal
+            journal.append({"volume": volume, "recordsWithNames": hits})
+            journal_hits += hits
     traces = bool(names_found or content_found or journal_hits)
-    if not checks:
-        summary = "No folder could be checked"
-    elif traces:
+    if traces:
         parts = []
         if names_found:
             parts.append(f"{len(names_found)} original name(s) still in folder metadata")
@@ -826,11 +935,16 @@ def verify_no_traces(groups: Dict[str, Any]) -> Dict[str, Any]:
         if journal_hits:
             parts.append(f"{journal_hits} NTFS change-journal record(s) still name the files")
         summary = "Traces found: " + "; ".join(parts)
+    elif not checks:
+        summary = "The drive could not be checked: " + (skipped[0]["reason"] if skipped else "nothing to check")
+    elif skipped:
+        summary = f"No trace found in {len(checks)} folder(s); {len(skipped)} could not be checked"
     else:
-        summary = ("No trace found: no original names, no recoverable content, no change-journal records"
-                   if SYSTEM == "Windows" else "No trace found: no original names, no recoverable content")
-    return {"checked": bool(checks), "tracesFound": traces, "namesFound": names_found,
-            "contentFound": content_found, "journal": journal, "folders": checks, "summary": summary}
+        summary = "No trace found: no original names, no recoverable content" + (
+            ", no change-journal records" if journal else "")
+    return {"checked": bool(checks) and not skipped, "tracesFound": traces, "namesFound": names_found,
+            "contentFound": content_found, "journal": journal, "folders": checks, "skipped": skipped,
+            "summary": summary}
 
 
 def create_sandbox(with_trace_demo: bool = True) -> Dict[str, Any]:

@@ -195,11 +195,20 @@ function foundFiles(r) {
     name: e.name, where: e.path.slice(0, -e.name.length) || '/', size: e.size, when: e.modified,
     condition: e.contentStatus || 'unreadable', detail: e.detail, file: e.recoveredPath, how: 'File system',
   }));
-  const carved = (r.carving?.files || []).filter(f => !f.alsoFoundAs).map(f => ({
-    name: `${f.id}.${f.ext}`, where: 'Name not known (found in free space)', size: f.size, when: null,
+  const carvedFiles = (r.carving?.files || []).filter(f => !f.alsoFoundAs);
+  const carved = carvedFiles.map(f => ({
+    name: `${f.id}.${f.ext}`, size: f.size, when: null,
+    where: f.fragments?.length > 1 ? `Name not known · rebuilt from ${f.fragments.length} pieces found in free space`
+      : 'Name not known (found in free space)',
     condition: f.status === 'partial' ? 'damaged' : 'intact', file: f.path,
     how: f.fragments?.length > 1 ? `Deep scan · rebuilt from ${f.fragments.length} pieces` : 'Deep scan',
   }));
+  for (const e of fsDeleted) {             // a damaged deleted file whose intact copy the deep scan rebuilt
+    if (e.condition !== 'damaged' && e.condition !== 'overwritten') continue;
+    const ext = (e.name.split('.').pop() || '').toLowerCase();
+    const copy = carvedFiles.find(f => f.status !== 'partial' && f.size === e.size && (f.ext === ext || (ext === 'jpeg' && f.ext === 'jpg')));
+    if (copy) e.note = `Intact copy rebuilt by the deep scan: ${copy.id}.${copy.ext}`;
+  }
   return [...fsDeleted, ...carved];
 }
 
@@ -240,7 +249,7 @@ function fileRow(f) {
   return `<tr><td>${thumb}</td>
     <td><div style="font-weight:600" class="trunc">${esc(f.name)}</div><div class="muted small trunc" title="${esc(f.where)}">${esc(f.where)}${f.when ? ` · deleted file last changed ${esc(when(f.when))}` : ''}</div></td>
     <td class="num">${bytes(f.size)}</td>
-    <td>${badge(label, tone)}${hint ? `<div class="muted small">${esc(hint)}</div>` : ''}</td>
+    <td>${badge(label, tone)}${f.note || hint ? `<div class="muted small">${esc(f.note || hint)}</div>` : ''}</td>
     <td class="nowrap">${actions}</td></tr>`;
 }
 

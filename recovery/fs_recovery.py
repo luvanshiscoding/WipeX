@@ -240,11 +240,13 @@ def _extract(entry, rec: Dict[str, object], out_dir: str) -> None:
         rec["detail"] = check.reason or "structure does not match the recorded size"
 
 
-def dir_traces(device: str, dir_path: str, names: List[str], hashes: set, max_bytes: int = 64 * 1024 * 1024) -> Dict[str, object]:
+def dir_traces(device: str, dir_path: str, names: List[str], hashes: set,
+               max_bytes: int = 64 * 1024 * 1024, depth: int = 4) -> Dict[str, object]:
     """
-    Read one directory straight from the volume (live and deleted entries) and report whether any
-    of the given file names, or any deleted entry whose content hashes to one of the given SHA-256
-    values, can still be found. Used to verify a file erasure from the forensic side.
+    Read one directory straight from the volume and report whether any of the given names, or any
+    deleted entry whose content hashes to one of the given SHA-256 values, can still be found. Deleted
+    subfolders are searched too, since an erased folder's entries live on in its own directory data.
+    Used to verify a file erasure from the forensic side.
     """
     if not HAS_TSK:
         return {"checked": False, "reason": "The Sleuth Kit (pytsk3) is not installed"}
@@ -252,27 +254,43 @@ def dir_traces(device: str, dir_path: str, names: List[str], hashes: set, max_by
     img = _open_img(device)
     try:
         fs = pytsk3.FS_Info(img, offset=0)
-        directory = fs.open_dir(path=dir_path or "/")
-        name_hits, content_hits, entries = [], [], 0
-        for entry in directory:
-            name = entry.info.name.name.decode("utf-8", "replace")
-            if name in (".", ".."):
-                continue
-            entries += 1
-            if name.lower() in wanted:
-                name_hits.append(name)
-            meta = entry.info.meta
-            deleted = bool(int(entry.info.name.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC))
-            if deleted and meta is not None and hashes and 0 < int(meta.size) <= max_bytes:
-                try:
-                    data = entry.read_random(0, int(meta.size))
-                except IOError:
+        name_hits: List[str] = []
+        content_hits: List[str] = []
+        seen: set = set()
+        count = [0]
+
+        def walk(directory, level: int) -> None:
+            for entry in directory:
+                if count[0] >= 50000:
+                    return
+                name = entry.info.name.name.decode("utf-8", "replace")
+                if name in (".", ".."):
                     continue
-                if hashlib.sha256(data).hexdigest() in hashes:
-                    content_hits.append(name)
-        return {"checked": True, "entries": entries, "namesFound": name_hits, "contentFound": content_hits}
+                count[0] += 1
+                if name.lower() in wanted:
+                    name_hits.append(name)
+                meta = entry.info.meta
+                if meta is None or not int(entry.info.name.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC):
+                    continue
+                if int(meta.type) == int(pytsk3.TSK_FS_META_TYPE_DIR):
+                    if level < depth and int(meta.addr) not in seen:
+                        seen.add(int(meta.addr))
+                        try:
+                            walk(entry.as_directory(), level + 1)
+                        except IOError:
+                            pass
+                elif hashes and 0 < int(meta.size) <= max_bytes:
+                    try:
+                        data = entry.read_random(0, int(meta.size))
+                    except IOError:
+                        continue
+                    if hashlib.sha256(data).hexdigest() in hashes:
+                        content_hits.append(name)
+
+        walk(fs.open_dir(path=dir_path or "/"), 0)
+        return {"checked": True, "entries": count[0], "namesFound": name_hits, "contentFound": content_hits}
     except IOError as exc:
-        return {"checked": False, "reason": f"Could not read the directory from the volume: {exc}"}
+        return {"checked": False, "reason": f"Could not read the folder from the volume: {exc}"}
     finally:
         try:
             img.close()

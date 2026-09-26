@@ -5,10 +5,10 @@ Scans a disk image or a raw device (opened read-only) for file headers at sector
 boundaries, parses each candidate with a format-specific structural parser, and
 writes out files whose structure validates.
 
-Fragmented files: for formats with strong integrity checks (PNG chunk CRCs, ZIP
-member CRCs) the carver attempts bifragment gap carving (Garfinkel 2007): when the
-structure breaks, it searches cluster-aligned split points and gap lengths for the
-one combination that makes the integrity checks pass again.
+Fragmented files: the carver attempts bifragment gap carving (Garfinkel 2007) for PNG
+(chunk CRCs), ZIP (member CRCs) and baseline JPEG (the entropy-coded data must decode
+exactly to EOI, see jpeg_frag.py): when the structure breaks, it searches cluster-aligned
+split points and gap lengths for the one combination that makes the checks pass again.
 """
 
 import hashlib
@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import ewf
 
+from . import jpeg_frag
 from .formats import FORMATS, Format, ParseResult, parse_png, parse_zip
 
 ProgressFn = Callable[[int, str], None]
@@ -220,15 +221,20 @@ def carve(source_path: str, out_dir: str, types: Optional[List[str]] = None, ali
         ext = pr.ext or fmt.ext
         blob, status, technique, fragments = None, "", "", []
 
-        if pr.valid:
+        if fmt.ext == "jpg" and (not pr.valid or jpeg_frag.suspicious(window[:pr.end])):
+            got = jpeg_frag.reassemble(src, off, window, cluster, max_gap, fmt.max_size, min(deadline, time.time() + 20))
+            if got:
+                blob, f1, f2 = got
+                status, technique, fragments = "repaired", "bifragment gap carving (JPEG decode-validated)", [f1, f2]
+        if blob is None and pr.valid:
             blob = window[:pr.end]
             status, technique, fragments = "valid", "signature + structure", [(off, pr.end)]
-        elif fmt.ext == "png" and pr.break_at:
+        elif blob is None and fmt.ext == "png" and pr.break_at:
             got = _png_bifragment(src, off, pr.break_at, cluster, max_gap, fmt.max_size, min(deadline, time.time() + 20))
             if got:
                 blob, f1, f2 = got
                 status, technique, fragments = "repaired", "bifragment gap carving (CRC-validated)", [f1, f2]
-        elif fmt.ext == "zip" and pr.info.get("gap"):
+        elif blob is None and fmt.ext == "zip" and pr.info.get("gap"):
             got = _zip_reassemble(src, off, pr, cluster, min(deadline, time.time() + 20))
             if got:
                 blob, f1, f2 = got

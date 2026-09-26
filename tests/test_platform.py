@@ -181,7 +181,8 @@ class E01Images(unittest.TestCase):
         case = cases.create_case("E01 case", "tester")
         ev = cases.acquire_evidence(case["id"], self.img, "lab", "tester", fmt="e01")
         self.assertTrue(ev["image_path"].endswith(".E01"))
-        self.assertEqual(ev["sha256"], hashlib.sha256(open(self.img, "rb").read()).hexdigest())
+        with open(self.img, "rb") as f:
+            self.assertEqual(ev["sha256"], hashlib.sha256(f.read()).hexdigest())
         self.assertLess(os.path.getsize(ev["image_path"]), os.path.getsize(self.img))
         self.assertTrue(cases.verify_evidence(ev["id"], "tester")["match"])
         res = recovery.scan(ev["image_path"], os.path.join(_TMP, "e01-out"))

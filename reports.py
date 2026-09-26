@@ -15,6 +15,8 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib.units import mm
 from reportlab.platypus import (KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
@@ -118,7 +120,15 @@ def _describe_check(c: Dict[str, Any]) -> str:
 
 # ── Erasure certificate ──────────────────────────────────────────────────────
 
-def certificate_pdf(cert: Dict[str, Any]) -> bytes:
+def _qr(text: str, size: float = 30 * mm) -> Drawing:
+    widget = QrCodeWidget(text)
+    x0, y0, x1, y1 = widget.getBounds()
+    drawing = Drawing(size, size, transform=[size / (x1 - x0), 0, 0, size / (y1 - y0), 0, 0])
+    drawing.add(widget)
+    return drawing
+
+
+def certificate_pdf(cert: Dict[str, Any], verify_url: Optional[str] = None) -> bytes:
     v = cert.get("verification") or {}
     ok = cert.get("trustScore") == "GREEN"
     story: List[Any] = [
@@ -155,6 +165,10 @@ def certificate_pdf(cert: Dict[str, Any]) -> bytes:
              ["Signature", Paragraph(cert.get("signatureAlgorithm", "ECDSA P-256"), BODY)],
              ["Signature status", "Valid" if cert.get("isValid") else "INVALID — do not rely on this certificate"]]),
         Paragraph("Verify at any time in WipeX → Verify certificate, using the certificate ID or serial number.", SMALL),
+        Table([[_qr(verify_url or cert["certificateId"]),
+                Paragraph("Scan to open this certificate in WipeX Verify on the issuing workstation.<br/>"
+                          f"Certificate ID: {cert['certificateId']}", SMALL)]],
+              colWidths=[34 * mm, 140 * mm], style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")])),
     ]
     story += _annexure(f"Certificate of data sanitization {cert['certificateId']}",
                        f"{cert.get('deviceModel')} (serial {cert.get('serialNumber')})",
@@ -232,6 +246,16 @@ def file_erasure_pdf(report: Dict[str, Any]) -> bytes:
                     [[f["path"], f"{f['size']:,}", ", ".join(s["name"] for s in f["streams"]) or "—",
                       "Yes" if f["verified"] else "No"] for f in report["files"]],
                     [110 * mm, 22 * mm, 25 * mm, 17 * mm])]
+    tc = report.get("traceCheck") or {}
+    story += [Paragraph("Drive trace check", H2),
+              Paragraph(tc.get("summary", "Not run"), BODY)]
+    rows = [[f["folder"], f"{f.get('entries', 0)}", ", ".join(f.get("namesFound", [])) or "none",
+             ", ".join(f.get("contentFound", [])) or "none"] for f in tc.get("folders", [])]
+    rows += [[s["folder"], "—", "not checked", s["reason"]] for s in tc.get("skipped", [])]
+    rows += [[j["volume"], "change journal", f"{j['recordsWithNames']} record(s)", "—"] for j in tc.get("journal", [])]
+    if rows:
+        story.append(_grid(["Folder read from the volume", "Entries", "Original names found", "Content found"],
+                           rows, [84 * mm, 24 * mm, 36 * mm, 30 * mm]))
     if report.get("traces"):
         story += [Paragraph("Trace cleanup", H2),
                   _grid(["Artefact", "Result"], [[t["path"], t["result"]] for t in report["traces"]], [120 * mm, 54 * mm])]

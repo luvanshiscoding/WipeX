@@ -367,11 +367,12 @@ def verify_certificate(query: str):
 
 
 @app.get("/api/certificates/{cert_id}/pdf")
-def certificate_pdf(cert_id: str, sess=Depends(need("report.read"))):
+def certificate_pdf(cert_id: str, request: Request, sess=Depends(need("report.read"))):
     cert = erasure.lookup_certificate(cert_id)
     if not cert:
         raise HTTPException(404, "Certificate not found")
-    return Response(reports.certificate_pdf(cert), media_type="application/pdf",
+    verify_url = f"{str(request.base_url).rstrip('/')}/#/verify?q={cert['certificateId']}"
+    return Response(reports.certificate_pdf(cert, verify_url), media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{cert_id}.pdf"'})
 
 

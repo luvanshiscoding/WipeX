@@ -95,11 +95,16 @@ def parse_jpeg(data: bytes) -> Optional[ParseResult]:
         if marker == 0xDA:                      # SOS: skip entropy-coded data
             seen_sos = True
             pos += 2 + seglen
+            next_rst = 0
             while True:
                 idx = data.find(b"\xff", pos)
                 if idx < 0 or idx + 1 >= n:
                     return ParseResult(n, False, "truncated in scan data", info, break_at=n)
                 nxt = data[idx + 1]
+                if 0xD0 <= nxt <= 0xD7:                 # restart markers must cycle 0..7 in order
+                    if nxt - 0xD0 != next_rst:
+                        return ParseResult(idx, False, "restart markers out of sequence", info, break_at=idx)
+                    next_rst = (next_rst + 1) & 7
                 if nxt == 0x00 or 0xD0 <= nxt <= 0xD7 or nxt == 0xFF:
                     pos = idx + 1 if nxt == 0xFF else idx + 2
                     continue

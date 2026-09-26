@@ -24,12 +24,13 @@
 |---|---|
 | Inputs | Files and folders on a mounted volume |
 | Content erasure | Overwrite (zero / random / 3-pass) → fsync → truncate → 3 random renames → timestamp reset → delete; folders bottom-up |
+| Directory entries | Placeholder files take over the slots that held the erased names (FAT/exFAT keep deleted names); with raw access WipeX reads the folder back and repeats in growing batches until no deleted entry carries an erased name |
 | Metadata erasure | NTFS alternate data streams; Linux `user.*` and macOS extended attributes (overwritten, then removed) |
 | Trace cleanup | Windows: Recent shortcuts, Jump Lists referencing the file, thumbcache (reported). Linux: recently-used.xbel, thumbnails. macOS: parent `.DS_Store`, Gatekeeper quarantine-event record, QuickLook cache, recent-items lists (reported) |
 | Storage policy | Detects file system, media type, bus and TRIM (incl. LVM / dm-crypt / btrfs on Linux); rates assurance High / Limited / Not effective and recommends M1 when needed |
 | Change journal | NTFS `$UsnJrnl` state detected; optional clearing after erasure (the journal is restarted empty) |
-| Verification | Trace check after every erasure: each folder is read straight from the volume with The Sleuth Kit for the original names and for deleted entries holding the original content (SHA-256). Needs Administrator on Windows, root on Linux/macOS. On Windows the NTFS change journal is also searched via `FSCTL_READ_USN_JOURNAL`. Verdict PASS / TRACES_REMAIN / PARTIAL |
-| Guards | Protected system locations, drive roots and home folders refused; legal holds; two-person rule |
+| Verification | Drive check after every erasure: the nearest remaining folder is read straight from the volume with The Sleuth Kit, including deleted subfolders, for the original names and for deleted entries holding the original content (SHA-256). Needs Administrator on Windows, root on Linux/macOS; APFS, Btrfs, ZFS and ReFS cannot be read this way and are reported as not checked. On Windows the NTFS change journal is also searched via `FSCTL_READ_USN_JOURNAL`. Verdict PASS / TRACES_REMAIN / ERASED_UNVERIFIED (drive check could not run) / PARTIAL |
+| Guards | Protected system locations, drive roots, mount points and home folders refused; legal holds; two-person rule |
 | Code | `file_eraser.py` |
 
 ### M3 — Carving & Recovery
@@ -37,8 +38,8 @@
 |---|---|
 | Inputs | Windows drive letters (whole volume or one folder, read-only, Administrator), raw images, raw devices, E01 images; acquired evidence |
 | Acquisition | Read source once → write raw `.dd` or E01 (zlib chunks, case metadata, MD5 + SHA-1 sections) → re-read and re-hash; SHA-256 + MD5 recorded |
-| Techniques | (1) File-system metadata via The Sleuth Kit (NTFS, FAT, exFAT, ext2/3/4, HFS+, ISO 9660, partition tables); (2) signature carving with structural validation (JPEG decode, PNG CRC, GIF, BMP, PDF, ZIP/Office member CRC, SQLite, MP4); (3) bifragment gap carving for PNG and ZIP |
-| Output | Recovered files with SHA-256, offset, technique, validation result, confidence; content status for deleted entries (intact / damaged / overwritten / zeroed by TRIM / unverified); PDF report |
+| Techniques | (1) File-system metadata via The Sleuth Kit (NTFS, FAT, exFAT, ext2/3/4, HFS+, ISO 9660, partition tables); (2) signature carving with structural validation (JPEG decode, PNG CRC, GIF, BMP, PDF, ZIP/Office member CRC, SQLite, MP4); (3) bifragment gap carving for PNG (chunk CRC), ZIP (member CRC) and baseline JPEG (the entropy-coded data must decode exactly to EOI; restart-marker order checked) |
+| Output | Recovered files with SHA-256, offset, technique, validation result, confidence; content status for deleted entries (intact / damaged / overwritten / zeroed by TRIM / unverified); PDF report with a BSA §63 annexure draft |
 | Code | `recovery/`, `ewf.py` |
 
 ## 2. Cross-cutting services
@@ -54,9 +55,10 @@
 ## 3. Workflows
 
 ```
-RECOVER:  Case → Acquire (raw or E01, hashed, re-verified) → Sleuth Kit + carving → review → signed PDF report
+RECOVER:  Case → Acquire (raw or E01, hashed, re-verified) → Sleuth Kit + carving → review → PDF report (file hashes, BSA §63 annexure)
 ERASE:    Legal-hold check → two-person approval (approver signs in) → erase (M1 / M2) →
-          verify: pattern read-back → canaries → recovery attempt with M3 → signed certificate
+          verify: M1 pattern read-back → canaries → recovery attempt with M3 → signed certificate
+                  M2 drive check (names, content, NTFS change journal) → report
 AUDIT:    Every step → hash-chained entry signed by workstation + person → verifiable at any time
 ```
 
@@ -82,4 +84,4 @@ AUDIT:    Every step → hash-chained entry signed by workstation + person → v
 - **Forensic soundness:** recovery never writes to source media; evidence is analysed from hashed copies.
 - **Offline:** no network access at runtime; the engine serves the UI and accepts only local requests.
 - **Honesty:** reports state the verification level actually reached and every method that could not run is explained.
-- **Portability:** Windows 10/11, Linux, macOS; see README §4 for the per-OS capability matrix.
+- **Portability:** Windows 10/11, Linux, macOS; see README §5 for the per-OS capability matrix.

@@ -3,6 +3,8 @@ WipeX regression tests. Run from the project root:  python -m unittest discover 
 Each run uses a throwaway workspace and database.
 """
 
+import hashlib
+import io
 import os
 import shutil
 import sqlite3
@@ -26,7 +28,7 @@ import file_eraser  # noqa: E402
 import lab_images  # noqa: E402
 import recovery  # noqa: E402
 import store  # noqa: E402
-from recovery import carver, formats  # noqa: E402
+from recovery import carver, formats, jpeg_frag  # noqa: E402
 
 
 class LabImageAndRecovery(unittest.TestCase):
@@ -55,7 +57,7 @@ class LabImageAndRecovery(unittest.TestCase):
         by_name = {f["name"]: f for f in self.truth["files"]}
         for name in ("orphan_photo.jpg", "orphan_invoice.pdf", "Quarterly_Report.pdf", "contacts.db", "Scan_0042.bmp"):
             self.assertIn(by_name[name]["sha256"], carved, name)
-        for name in ("Network_Diagram.png", "Backup_Old.zip"):
+        for name in ("Network_Diagram.png", "Backup_Old.zip", "Site_Photo_03.jpg"):
             f = carved.get(by_name[name]["sha256"])
             self.assertIsNotNone(f, f"{name} not reassembled")
             self.assertEqual(f["status"], "repaired")
@@ -88,6 +90,63 @@ class FormatValidators(unittest.TestCase):
         self.assertTrue(formats.parse_zip(bytes(blob)).valid)
         blob[200] ^= 0x01
         self.assertFalse(formats.parse_zip(bytes(blob)).valid)
+
+
+class JpegFragments(unittest.TestCase):
+    """Bifragment gap carving for JPEG: after the gap, the image data must decode exactly to its end."""
+    C = 4096
+
+    @staticmethod
+    def _reencode(photo: bytes, **options) -> bytes:
+        from PIL import Image
+        out = io.BytesIO()
+        Image.open(io.BytesIO(photo)).save(out, "JPEG", **options)
+        return out.getvalue()
+
+    def _carve_split(self, photo: bytes, gap: bytes):
+        split = len(photo) // self.C // 2 * self.C
+        img = bytes(2 * self.C) + photo[:split] + gap + photo[split:]
+        img += bytes(-len(img) % self.C) + os.urandom(2 * self.C)
+        path = os.path.join(_TMP, "jfrag.img")
+        with open(path, "wb") as f:
+            f.write(img)
+        res = carver.carve(path, os.path.join(_TMP, "jfrag-out"))
+        want = hashlib.sha256(photo).hexdigest()
+        return [f for f in res["files"] if f["sha256"] == want], res
+
+    def test_decoder_accepts_intact_variants(self):
+        base = lab_images._photo_jpeg(20, 640, 480)
+        from PIL import Image
+        gray = io.BytesIO()
+        Image.open(io.BytesIO(base)).convert("L").save(gray, "JPEG", quality=85)
+        for blob in (base, self._reencode(base, quality=95, subsampling=0), self._reencode(base, optimize=True),
+                     self._reencode(base, quality=90, restart_marker_blocks=4), gray.getvalue(),
+                     lab_images._photo_jpeg(22, 332, 201)):
+            self.assertEqual(jpeg_frag.check(blob), (True, ""))
+        self.assertFalse(jpeg_frag.check(base[:len(base) // 2] + bytes([0xFF, 0xD9]))[0])
+
+    def test_gap_of_random_zero_or_text_data_is_bridged(self):
+        photo = lab_images._photo_jpeg(21, 640, 480)
+        text = (b"meeting notes, draft 3. " * 400)[:2 * self.C]
+        for gap in (os.urandom(3 * self.C), bytes(2 * self.C), text):
+            hits, res = self._carve_split(photo, gap)
+            self.assertEqual(len(hits), 1, res["stats"])
+            self.assertEqual(hits[0]["status"], "repaired")
+            self.assertEqual(len(hits[0]["fragments"]), 2)
+            self.assertEqual(len(res["files"]), 1)                  # nothing else carved from the splice
+
+    def test_restart_markers_expose_a_gap_of_another_jpeg(self):
+        a = self._reencode(lab_images._photo_jpeg(23, 640, 480), quality=90, restart_marker_blocks=4)
+        b = self._reencode(lab_images._photo_jpeg(24, 640, 480), quality=90, restart_marker_blocks=4)
+        hits, res = self._carve_split(a, b[4 * self.C:7 * self.C])
+        self.assertEqual(len(hits), 1, res["stats"])
+
+    def test_missing_continuation_yields_nothing(self):
+        photo = lab_images._photo_jpeg(25, 640, 480)
+        path = os.path.join(_TMP, "jtrunc.img")
+        with open(path, "wb") as f:
+            f.write(bytes(self.C) + photo[:40 * 1024] + os.urandom(16 * self.C))
+        self.assertEqual(carver.carve(path, os.path.join(_TMP, "jtrunc-out"))["files"], [])
 
 
 class Erasure(unittest.TestCase):
@@ -209,14 +268,16 @@ class FileEraser(unittest.TestCase):
     def test_guards(self):
         self.assertIsNotNone(file_eraser.check_path_allowed(os.path.expanduser("~")))
         self.assertIsNotNone(file_eraser.check_path_allowed(os.path.abspath(__file__)))
+        root = os.path.abspath(os.sep)                                 # a drive root / mount point
+        self.assertIsNotNone(file_eraser.check_path_allowed(root))
 
     def test_erase_sandbox(self):
         sb = file_eraser.create_sandbox(with_trace_demo=False)
         report = file_eraser.erase([sb["path"]], "random", True, "Tester")
         # The system drive's change journal may still name the files (clearing it is opt-in),
         # but nothing may be left in the folders themselves.
-        self.assertIn(report["verdict"], ("PASS", "TRACES_REMAIN"))
         tc = report["traceCheck"]
+        self.assertIn(report["verdict"], ("PASS", "TRACES_REMAIN") if tc.get("checked") else ("ERASED_UNVERIFIED",))
         if tc.get("checked"):
             self.assertEqual(tc["namesFound"], [])
             self.assertEqual(tc["contentFound"], [])
@@ -231,6 +292,7 @@ class Benchmark(unittest.TestCase):
         res = benchmark.run(img["devicePath"])
         self.assertEqual(res["combined"]["recall"], 1.0, res["missed"])
         self.assertEqual(res["carving"]["precision"], 1.0)
+        self.assertEqual(res["carving"]["recall"], 1.0)         # includes the fragmented JPEG
 
 
 def tearDownModule():

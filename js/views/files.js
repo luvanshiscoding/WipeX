@@ -33,7 +33,7 @@ function render() {
     <div class="page-head">
       <div>
         <h1 class="page-title">Permanently delete files</h1>
-        <p class="page-desc">Destroy chosen files and folders so they cannot be recovered or traced: their content, their names and the records Windows keeps about them. Afterwards WipeX checks the drive to prove nothing is left.</p>
+        <p class="page-desc">Destroy chosen files and folders so they cannot be recovered or traced: their content, their names and the records the operating system keeps about them. Afterwards WipeX checks the drive to prove nothing is left.</p>
       </div>
     </div>
     <div class="card">
@@ -117,7 +117,10 @@ function jobCard() {
   const tc = r.traceCheck || {};
   const overwrote = !r.failures.length && r.files.every(f => f.verified);
   const title = r.verdict === 'PASS' ? 'Permanently deleted: no trace found'
-    : r.verdict === 'TRACES_REMAIN' ? 'Deleted, but some traces remain' : 'Some files could not be erased';
+    : r.verdict === 'TRACES_REMAIN' ? 'Deleted, but some traces remain'
+    : r.verdict === 'ERASED_UNVERIFIED' ? 'Deleted and overwritten; the drive check could not run' : 'Some files could not be erased';
+  const ran = (tc.folders || []).length > 0;
+  const skipped = tc.skipped || [];
   const journalHits = (tc.journal || []).reduce((n, x) => n + (x.recordsWithNames || 0), 0);
   return `
     <div class="card" style="margin-top:16px">
@@ -128,10 +131,11 @@ function jobCard() {
           <div><div class="verdict-title">${esc(title)}</div><div class="verdict-text">${r.files.length} file(s), ${bytes(r.bytesOverwritten)} overwritten and removed.</div></div></div>
         <div class="verdict-list">
           ${checkLine(overwrote, overwrote ? 'Content overwritten, names scrambled, files removed' : `${r.failures.length} item(s) failed`)}
-          ${checkLine(tc.checked ? !(tc.namesFound || []).length : null, tc.checked ? ((tc.namesFound || []).length ? 'Original names still visible in the folder' : 'Original names no longer on the drive') : tc.summary || 'Drive check not run')}
-          ${checkLine(tc.checked ? !(tc.contentFound || []).length : null, tc.checked ? ((tc.contentFound || []).length ? 'Some content can still be recovered' : 'Recovery attempt found none of the content') : 'Recovery attempt not run')}
+          ${ran ? checkLine(!(tc.namesFound || []).length, (tc.namesFound || []).length ? 'Original names still visible on the drive' : 'Original names no longer on the drive') : checkLine(null, tc.summary || 'Drive check not run')}
+          ${ran ? checkLine(!(tc.contentFound || []).length, (tc.contentFound || []).length ? 'Some content can still be recovered' : 'Recovery attempt found none of the content') : ''}
+          ${ran && skipped.length ? checkLine(null, `${skipped.length} folder(s) could not be checked: ${skipped[0].reason}`) : ''}
           ${(tc.journal || []).length ? checkLine(!journalHits, journalHits ? `${journalHits} change-journal record(s) still name the files (tick "Clear the drive's change journal" next time)` : 'Change journal holds none of the names') : ''}
-          ${removedTraces(r) ? checkLine(true, `${removedTraces(r)} Windows trace(s) removed (recent-files shortcuts, Jump Lists)`) : ''}
+          ${removedTraces(r) ? checkLine(true, `${removedTraces(r)} system trace(s) removed (recent-file lists, shortcuts, thumbnails)`) : ''}
         </div>
       </div>
       <details class="more"><summary>Technical details</summary><div class="more-body stack">
@@ -140,7 +144,7 @@ function jobCard() {
             <td>${[...f.streams, ...(f.xattrs || [])].map(s => esc(s.name)).join(', ') || '—'}</td></tr>`).join('')}
             ${r.failures.map(f => `<tr><td class="trunc mono">${esc(f.path)}</td><td colspan="2">${badge('Failed', 'bad')} ${esc(f.error)}</td></tr>`).join('')}</tbody></table></div>
         ${[...r.traces, ...(r.journal || [])].map(t => `<div class="small"><span class="mono">${esc(t.path || t.volume)}</span>: ${esc(t.result)}</div>`).join('')}
-        <div class="muted small">Pattern: ${esc((METHODS.find(m => m.id === r.method) || {}).label || r.method)} · Job ${esc(r.jobId)} · ${esc(tc.summary || '')}</div>
+        <div class="muted small">Pattern: ${esc((METHODS.find(m => m.id === r.method) || {}).label || r.method)} · Directory entries reused: ${r.directorySlotsReused || 0} · Job ${esc(r.jobId)} · ${esc(tc.summary || '')}</div>
       </div></details>
     </div>`;
 }
