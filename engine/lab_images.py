@@ -483,6 +483,39 @@ def reset_image(image_id: str) -> Dict[str, Any]:
     return describe(path)
 
 
+def quick_format(image_id: str) -> Dict[str, Any]:
+    """Quick-format a FAT16 sample disk the way Windows does: new boot record, empty FATs and root
+    directory, data clusters untouched. The file system then lists nothing, and only carving
+    (deep scan) can bring the files back."""
+    path = path_for_id(image_id)
+    if not path:
+        raise FileNotFoundError(image_id)
+    with open(path, "r+b") as f:
+        bs = bytearray(f.read(SECTOR))
+        if bs[54:59] != b"FAT16" or bs[510:512] != b"\x55\xAA":
+            raise ValueError("Only a FAT16 sample disk can be quick-formatted; reset it to sample data first")
+        reserved, nfats, root_entries = struct.unpack_from("<H", bs, 14)[0], bs[16], struct.unpack_from("<H", bs, 17)[0]
+        fat_sectors = struct.unpack_from("<H", bs, 22)[0]
+        struct.pack_into("<I", bs, 39, secrets.randbits(32))              # a new volume serial, as format does
+        f.seek(0)
+        f.write(bs)
+        empty_fat = bytearray(fat_sectors * SECTOR)
+        empty_fat[0:4] = b"\xF8\xFF\xFF\xFF"
+        for i in range(nfats):
+            f.seek((reserved + i * fat_sectors) * SECTOR)
+            f.write(empty_fat)
+        root = bytearray(root_entries * 32)
+        root[0:11] = bs[43:54]
+        root[11] = 0x08                                                     # volume label entry
+        f.seek((reserved + nfats * fat_sectors) * SECTOR)
+        f.write(root)
+    meta = _read_meta(path)
+    meta["kind"] = "formatted"
+    with open(_meta_path(path), "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+    return describe(path)
+
+
 def delete_image(image_id: str) -> None:
     path = path_for_id(image_id)
     if not path:
@@ -556,7 +589,7 @@ def describe(path: str, with_files: bool = True) -> Dict[str, Any]:
         "devicePath": path,
         "model": f"Lab disk image · {name}",
         "type": "Disk image",
-        "interface": "File-backed (FAT16)" if meta.get("kind") == "sample" else "File-backed",
+        "interface": "File-backed (FAT16)" if meta.get("kind") in ("sample", "formatted") else "File-backed",
         "capacity": _human(size),
         "capacityBytes": size,
         "serialNumber": meta["serial"],

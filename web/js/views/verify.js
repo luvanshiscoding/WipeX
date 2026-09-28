@@ -1,5 +1,5 @@
 /** Verify a sanitization certificate: signature check plus comparison with the ledger record. */
-import { ApiError, api, apiUrl, esc, icon, reportError, when } from '../core.js';
+import { ApiError, api, apiUrl, demo, esc, icon, refreshDemo, reportError, when } from '../core.js';
 import { certificateHtml } from './drive.js';
 
 let root;
@@ -8,12 +8,14 @@ let lastQuery = '';
 export async function show(el, params) {
   root = el;
   if (params.q) lastQuery = params.q;
-  const recent = await api('/api/certificates').then(r => r.certificates.slice(0, 5)).catch(() => []);
+  // Demo mode lists only certificates of sample disks
+  const recent = await api('/api/certificates').then(r => r.certificates
+    .filter(c => !demo.enabled || c.storageType === 'Disk image' || /^Lab disk image/.test(c.deviceModel || '')).slice(0, 5)).catch(() => []);
   root.innerHTML = `
     <div class="page-head">
       <div>
         <h1 class="page-title">Verify certificate</h1>
-        <p class="page-desc">Check that a sanitization certificate was issued by this workstation and has not been altered since. Scanning the QR code on a certificate opens this page directly.</p>
+        <p class="page-desc">Check that a certificate was issued here and not altered since. The QR code on a certificate opens this page.</p>
       </div>
     </div>
     <div class="grid cols-side">
@@ -44,6 +46,7 @@ async function lookup() {
   out.innerHTML = '<div class="card"><div class="empty">Checking signature…</div></div>';
   try {
     const c = await api(`/api/verify/${encodeURIComponent(lastQuery)}`);
+    refreshDemo();
     out.innerHTML = `
       <div class="verdict ${c.isValid ? '' : 'bad'}" style="margin-bottom:16px">
         <span class="verdict-icon">${icon(c.isValid ? 'check' : 'x', 22, 2.6)}</span>

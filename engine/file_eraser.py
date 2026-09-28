@@ -41,6 +41,7 @@ import stat
 import string
 import struct
 import subprocess
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -70,27 +71,103 @@ def _protected_roots() -> List[str]:
         roots += [os.environ.get("SystemRoot", r"C:\Windows"), os.environ.get("ProgramFiles", r"C:\Program Files"),
                   os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
                   os.environ.get("ProgramData", r"C:\ProgramData")]
+        roots += [os.path.join(sysdrive, d) for d in ("Recovery", "System Volume Information", "Boot", "EFI", "PerfLogs",
+                                                      "pagefile.sys", "hiberfil.sys", "swapfile.sys", "bootmgr", "BOOTNXT")]
         exact = [sysdrive, os.path.expanduser("~"), os.path.join(sysdrive, "Users")]
     else:
         roots += ["/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/run", "/sbin", "/snap", "/sys",
                   "/usr", "/System", "/Library", "/Applications", "/private/etc", "/private/var/db", "/var/lib"]
         exact = ["/", os.path.expanduser("~"), "/home", "/Users", "/Volumes", "/var", "/tmp", "/private", "/opt"]
+    # The user's standard folders themselves (their contents can be erased)
+    exact += [os.path.join(os.path.expanduser("~"), d) for d in ("Desktop", "Documents", "Downloads", "Pictures", "Music",
+                                                                 "Videos", "Movies", "AppData", "Library", "OneDrive")]
     return [os.path.normcase(os.path.abspath(r)) for r in roots if r], \
         [os.path.normcase(os.path.abspath(r)) for r in exact if r]
+
+
+def is_removable_root(path: str) -> bool:
+    """The root of a mounted USB stick, memory card or portable drive (not the system drive). Choosing it
+    means "every file and folder on it": the drive itself stays and remains usable."""
+    ap = os.path.abspath(path)
+    if not os.path.ismount(ap):
+        return False
+    if SYSTEM == "Windows":
+        root = _volume_root(ap)
+        if os.path.normcase(root) == os.path.normcase(os.environ.get("SystemDrive", "C:") + "\\"):
+            return False
+        return ctypes.windll.kernel32.GetDriveTypeW(root) == 2 or _media_info(root).get("busType") in ("USB", "SD", "MMC")
+    if SYSTEM == "Darwin":
+        return ap.startswith("/Volumes/") and os.path.realpath(ap) != "/"
+    return ap.startswith(("/media/", "/run/media/"))
+
+
+_KEEP_AT_ROOT = {"system volume information"}          # Windows' own restore-point folder on every volume
+
+
+def _walk_targets(path: str, root_item: bool):
+    """os.walk over an erase target, yielding (folder, subfolders, files, links). Links and junctions are
+    listed apart and never entered. On a whole-drive target, skip the OS folder and anything protected
+    (e.g. a WipeX installation or workspace on that same stick)."""
+    here = os.path.normcase(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    workspace = os.path.normcase(os.path.abspath(store.WORKSPACE))
+    for top, dnames, fnames in os.walk(path):
+        links = [n for n in dnames + fnames if _is_link(os.path.join(top, n))]
+        keep = []
+        for d in dnames:
+            full = os.path.normcase(os.path.abspath(os.path.join(top, d)))
+            if d in links:
+                continue
+            if root_item and ((os.path.normcase(top) == os.path.normcase(path) and d.lower() in _KEEP_AT_ROOT)
+                              or full in (here, workspace) or here.startswith(full + os.sep) or workspace.startswith(full + os.sep)):
+                continue
+            keep.append(d)
+        dnames[:] = keep
+        yield top, dnames, [f for f in fnames if f not in links], [os.path.join(top, n) for n in links]
+
+
+def _remove_link(path: str) -> None:
+    """Delete a link or junction itself; its target is not touched."""
+    if SYSTEM == "Windows" and os.path.isdir(path):
+        os.rmdir(path)                                 # directory symlink or junction
+    else:
+        os.unlink(path)
+
+
+_PROFILE_PARENTS = ("users", "home")                 # C:\\Users\\<name>, /Users/<name>, /home/<name>
+
+
+def _is_link(path: str) -> bool:
+    """A symbolic link, or a directory junction / mount point on Windows. WipeX removes the link itself
+    and never follows it: overwriting through a link would destroy whatever it points to."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return stat.S_ISDIR(st.st_mode) and bool(getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def check_path_allowed(path: str) -> Optional[str]:
     """Return a reason string when the path must not be erased, else None."""
     ap = os.path.normcase(os.path.abspath(path))
+    real = os.path.normcase(os.path.realpath(path))    # a junction or symlink is judged by where it points too
     roots, exact = _protected_roots()
     workspace = os.path.normcase(os.path.abspath(store.WORKSPACE))
-    if ap == workspace or ap.startswith(workspace + os.sep):
+    if (ap == workspace or ap.startswith(workspace + os.sep)) and not _is_link(path):
         return None                                   # WipeX sandbox is always allowed
-    if ap in exact or os.path.ismount(ap):
-        return "Refusing to erase a drive root, home folder or top-level system folder"
-    for r in roots:
-        if ap == r or ap.startswith(r + os.sep):
-            return f"Protected location ({r})"
+    if is_removable_root(path):
+        return None                                   # a USB stick's contents (the stick itself stays)
+    for p in {ap, real}:
+        if p in exact or os.path.ismount(p):
+            return "Refusing to erase a drive root, home folder or top-level system folder"
+        parent = os.path.dirname(p)
+        top = os.path.dirname(parent)
+        if os.path.basename(parent).lower() in _PROFILE_PARENTS and top == os.path.dirname(top):
+            return "Refusing to erase a user profile folder"
+        for r in roots:
+            if p == r or p.startswith(r + os.sep):
+                return f"Protected location ({r})"
     return None
 
 
@@ -651,8 +728,10 @@ def _scrub_slots(folder: str, names: List[str], raw: bool) -> int:
     placeholder files: four per erased name with the same length, plus one-slot names. With raw access
     (Administrator / root) it then reads the folder back and adds placeholders in growing batches until no
     deleted entry in the folder carries an erased name. Returns how many placeholders were used.
+    NTFS is skipped: the three renames already replace the names in the folder index (measured: no original
+    name found without this step), and each extra read-back of a large NTFS volume costs 10-20 seconds.
     """
-    if not names or not os.path.isdir(folder):
+    if not names or not os.path.isdir(folder) or _fs_type(_volume_root(folder)) == "NTFS":
         return 0
     used = _placeholders(folder, ([len(n) for n in names for _ in range(4)] + [8] * 16)[:2000])
     if not raw:
@@ -688,14 +767,20 @@ def analyze(paths: List[str]) -> Dict[str, Any]:
             entry["blocked"] = f"Under legal hold {hold['id']} (case {hold['case_id']})"
         if entry.get("blocked"):
             blocked.append(ap)
-        files = []
-        if os.path.isdir(ap):
-            for root, _dirs, fnames in os.walk(ap):
+        files, links = [], []
+        root_item = os.path.isdir(ap) and is_removable_root(ap)
+        if _is_link(ap):
+            links = [ap]
+        elif os.path.isdir(ap):
+            for root, _dirs, fnames, lks in _walk_targets(ap, root_item):
                 files += [os.path.join(root, n) for n in fnames]
+                links += lks
         else:
             files = [ap]
+        entry["links"] = len(links)
+        entry["wholeDrive"] = root_item
         trace_files += files[:2000 - len(trace_files)]
-        entry.update({"isDir": os.path.isdir(ap), "fileCount": len(files),
+        entry.update({"isDir": os.path.isdir(ap) and not _is_link(ap), "isLink": _is_link(ap), "fileCount": len(files),
                       "bytes": sum(os.path.getsize(f) for f in files if os.path.isfile(f)),
                       "streams": sum(len(list_streams(f)) for f in files[:500]),
                       "xattrs": sum(len(list_xattrs(f)) for f in files[:500]),
@@ -720,15 +805,21 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
     audit_log.append("file_erasure.started", operator, details={"jobId": job_id, "paths": paths, "method": method,
                                                                 "approver": approver or None,
                                                                 "approvalSignature": (approval or {}).get("signature")})
-    files, dirs = [], []
+    files, dirs, links = [], [], []
     for item in pre["items"]:
         if not item.get("exists"):
             continue
-        if item["isDir"]:
-            for root, dnames, fnames in os.walk(item["path"], topdown=False):
+        if item.get("isLink"):
+            links.append(item["path"])
+        elif item["isDir"]:
+            found = []
+            for root, dnames, fnames, lks in _walk_targets(item["path"], item.get("wholeDrive", False)):
                 files += [os.path.join(root, n) for n in fnames]
-                dirs += [os.path.join(root, d) for d in dnames]
-            dirs.append(item["path"])
+                found += [os.path.join(root, d) for d in dnames]
+                links += lks
+            dirs += sorted(found, key=lambda d: d.count(os.sep), reverse=True)   # deepest first
+            if not item.get("wholeDrive"):                                         # a drive's root stays
+                dirs.append(item["path"])
         else:
             files.append(item["path"])
 
@@ -743,6 +834,11 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
             failures.append({"path": fp, "error": str(exc)})
         if progress:
             progress(int((i + 1) * 85 / max(1, len(files))), f"Erased {i + 1} of {len(files)} files")
+    for lp in links:                                 # links go before their folders; targets stay as they are
+        try:
+            _remove_link(lp)
+        except OSError as exc:
+            failures.append({"path": lp, "error": str(exc)})
     raw = _is_admin()
     erased_names: Dict[str, List[str]] = {}
     for fp in files:
@@ -776,7 +872,7 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
     report = {
         "jobId": job_id, "method": method, "passes": len(PASS_SETS[method]), "operator": operator,
         "approver": approver or None, "approval": approval, "files": results, "failures": failures,
-        "foldersRemoved": len(dirs) - sum(1 for f in failures if f["path"] in dirs),
+        "foldersRemoved": len(dirs) - sum(1 for f in failures if f["path"] in dirs), "linksRemoved": len(links),
         "streamsErased": sum(len(r["streams"]) for r in results),
         "xattrsErased": sum(len(r.get("xattrs", [])) for r in results),
         "bytesOverwritten": sum(r["size"] for r in results),
@@ -787,9 +883,14 @@ def erase(paths: List[str], method: str, clean: bool, operator: str, approver: s
                     else "PASS" if trace_check.get("checked") else "ERASED_UNVERIFIED"),
         "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    report["summary"] = (f"{len(results)} files erased ({report['bytesOverwritten']:,} bytes, {report['passes']} pass(es)), "
-                         f"{report['streamsErased'] + report['xattrsErased']} streams/attributes, {len([t for t in trace_results if t['result'] in ('erased', 'entry removed')])} traces removed"
-                         + (f", {len(failures)} failures" if failures else ""))
+    n_traces = len([t for t in trace_results if t['result'] in ('erased', 'entry removed')])
+    n_streams = report['streamsErased'] + report['xattrsErased']
+    plural = lambda n, one, many: f"{n:,} {one if n == 1 else many}"  # noqa: E731
+    report["summary"] = (f"{plural(len(results), 'file', 'files')} erased ({plural(report['bytesOverwritten'], 'byte', 'bytes')}, "
+                         f"{plural(report['passes'], 'pass', 'passes')}), "
+                         f"{plural(n_streams, 'hidden stream', 'hidden streams')}, {plural(n_traces, 'system trace', 'system traces')} removed"
+                         + (f", {plural(len(links), 'link', 'links')} removed without following" if links else "")
+                         + (f", {plural(len(failures), 'failure', 'failures')}" if failures else ""))
     audit_log.append("file_erasure.finished", operator, details={"jobId": job_id, "verdict": report["verdict"],
                                                                  "files": len(results), "failures": len(failures),
                                                                  "traceCheck": trace_check.get("summary")})
@@ -900,24 +1001,22 @@ def verify_no_traces(groups: Dict[str, Any]) -> Dict[str, Any]:
         t["names"].update(g["names"])
         t["hashes"].update(g["hashes"])
     checks, skipped, names_found, content_found = [], [], [], []
-    devices: Dict[str, Tuple[Optional[str], str]] = {}
-    for (volume, folder), t in targets.items():
-        if volume not in devices:
-            devices[volume] = _volume_device(volume)
-            if devices[volume][0]:
-                _flush_volume(volume)
-        device, why = devices[volume]
+    for volume in sorted({v for v, _ in targets}):                   # one file-system open per volume
+        folders = [(f, t) for (v, f), t in targets.items() if v == volume]
+        device, why = _volume_device(volume)
         if not device:
-            skipped.append({"folder": folder, "reason": why})
+            skipped += [{"folder": f, "reason": why} for f, _ in folders]
             continue
-        rel = "/" + os.path.realpath(folder)[len(volume):].replace("\\", "/").strip("/")
-        res = fs_recovery.dir_traces(device, rel, sorted(t["names"]), t["hashes"])
-        if not res.get("checked"):
-            skipped.append({"folder": folder, "reason": res.get("reason", "could not be read")})
-            continue
-        checks.append({"folder": folder, **res})
-        names_found += res.get("namesFound", [])
-        content_found += res.get("contentFound", [])
+        _flush_volume(volume)
+        rels = [("/" + os.path.realpath(f)[len(volume):].replace("\\", "/").strip("/"), sorted(t["names"]), t["hashes"])
+                for f, t in folders]
+        for (folder, _t), res in zip(folders, fs_recovery.dir_traces_many(device, rels)):
+            if not res.get("checked"):
+                skipped.append({"folder": folder, "reason": res.get("reason", "could not be read")})
+                continue
+            checks.append({"folder": folder, **res})
+            names_found += res.get("namesFound", [])
+            content_found += res.get("contentFound", [])
     journal, journal_hits = [], 0
     for volume in {v for v, _ in targets} if SYSTEM == "Windows" else ():
         names = sorted({n for (v, _), t in targets.items() if v == volume for n in t["names"]})
@@ -947,9 +1046,37 @@ def verify_no_traces(groups: Dict[str, Any]) -> Dict[str, Any]:
             "summary": summary}
 
 
+def sandbox_roots() -> List[str]:
+    """Where WipeX creates sample files: its workspace, or a WipeX folder in the system temp directory."""
+    return [os.path.abspath(store.workspace_path("m2-sandbox")), os.path.join(os.path.realpath(tempfile.gettempdir()), "WipeX-sandbox")]
+
+
+def _raw_readable(folder: str) -> bool:
+    """True when this process can read the folder's volume directly, which the drive check needs."""
+    device, _why = _volume_device(_volume_root(folder))
+    if not device or not _is_admin():
+        return False
+    try:
+        with open(device, "rb", buffering=0) as f:
+            return len(f.read(4096)) == 4096
+    except OSError:
+        return False
+
+
+def _sandbox_base() -> str:
+    """The workspace, unless its volume cannot be read directly (e.g. a security filter blocks raw reads);
+    then the temp folder, if that volume can be, so the drive check can still prove the result."""
+    workspace, temp = sandbox_roots()
+    if _is_admin() and not _raw_readable(workspace):
+        os.makedirs(temp, exist_ok=True)
+        if _raw_readable(temp):
+            return temp
+    return workspace
+
+
 def create_sandbox(with_trace_demo: bool = True) -> Dict[str, Any]:
-    """Create a disposable folder of sample files (inside the WipeX workspace) to demonstrate M2 safely."""
-    root = store.workspace_path("m2-sandbox", time.strftime("%Y%m%d-%H%M%S"))
+    """Create a disposable folder of sample files to demonstrate M2 safely."""
+    root = os.path.join(_sandbox_base(), time.strftime("%Y%m%d-%H%M%S"))
     os.makedirs(os.path.join(root, "Confidential"), exist_ok=True)
     samples = {
         "Salary_Sheet_2026.csv": "employee,salary\n" + "".join(f"E{i:03d},{50000 + i * 731}\n" for i in range(200)),

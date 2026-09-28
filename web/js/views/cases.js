@@ -28,7 +28,7 @@ function render() {
     <div class="page-head">
       <div>
         <h1 class="page-title">Cases</h1>
-        <p class="page-desc">Keep evidence, legal holds and custody records together. A device or folder under an active hold cannot be erased by any module.</p>
+        <p class="page-desc">Evidence, legal holds and custody records. Anything under a hold cannot be erased.</p>
       </div>
       ${can('case.manage') ? `<button class="btn btn-primary" id="cs-new">${icon('plus', 16)} New case</button>` : ''}
     </div>
@@ -206,7 +206,7 @@ async function acquire() {
     onMount: (bd) => {
       const sync = () => { const lab = bd.querySelector('#aq-kind').value === 'lab'; bd.querySelector('#aq-lab-f').classList.toggle('hidden', !lab); bd.querySelector('#aq-path-f').classList.toggle('hidden', lab); };
       bd.querySelector('#aq-kind').addEventListener('change', sync);
-      bd.querySelector('#aq-browse').addEventListener('click', async () => { const p = await pickPaths({ title: 'Choose an image file' }); if (p?.[0]) bd.querySelector('#aq-path').value = p[0]; });
+      bd.querySelector('#aq-browse').addEventListener('click', async () => { const p = await pickPaths({ title: 'Choose an image file', pick: 'file' }); if (p?.[0]) bd.querySelector('#aq-path').value = p[0]; });
     },
   });
   if (!res) return;

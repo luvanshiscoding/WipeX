@@ -1,16 +1,17 @@
-/** M1 — Drive Eraser: device → method → erase & verify → certificate. */
+/** Erase a whole drive (M1): device → method → erase & verify → certificate. Shown inside the Erase page. */
 import qrcode from 'qrcode-generator';
-import { api, apiUrl, badge, bytes, checksList, confirmDanger, esc, getOperator, icon, modal, progressBlock,
-  reportError, sleep, statusBadge, toast, when } from '../core.js';
+import { api, apiUrl, badge, bytes, checksList, confirmDanger, demo, esc, getOperator, icon, modal, progressBlock,
+  refreshDemo, reportError, sleep, statusBadge, toast, when } from '../core.js';
 
-const S = { step: 1, devices: [], methods: [], selected: null, method: null, psid: '', wipeId: null, status: null, cert: null, loading: false };
+const S = { step: 1, devices: [], methods: [], selected: null, method: null, psid: '', wipeId: null, status: null, cert: null, loading: false, demo: undefined };
 let root, appRef, pollToken = 0;
+const visible = () => root?.isConnected && root.closest('.view')?.classList.contains('active');
 
 export async function show(el, _params, app) {
   root = el;
   appRef = app;
   if (!S.methods.length) S.methods = await api('/api/methods').catch(() => []);
-  if (S.step === 1) await loadDevices();
+  if (S.step === 1 || S.demo !== demo.enabled) await loadDevices();
   render();
 }
 
@@ -26,13 +27,15 @@ async function loadDevices(refresh = false) {
 
 function render() {
   if (!root) return;
+  if (S.demo !== demo.enabled) {             // demo mode switched: start over with the other set of drives
+    if (S.demo !== undefined && S.step !== 3) { S.step = 1; S.selected = null; S.method = null; S.cert = null; }
+    S.demo = demo.enabled;
+  }
+  if (S.shownStep !== S.step) {              // a new step starts at the top of the page
+    if (S.shownStep !== undefined) window.scrollTo({ top: 0 });
+    S.shownStep = S.step;
+  }
   root.innerHTML = `
-    <div class="page-head">
-      <div>
-        <h1 class="page-title">Erase a whole drive</h1>
-        <p class="page-desc">Wipe an entire disk or USB drive to NIST SP 800-88, prove that nothing can be recovered, and get a signed certificate.</p>
-      </div>
-    </div>
     ${stepper()}
     <div id="drive-body"></div>`;
   const body = root.querySelector('#drive-body');
@@ -58,14 +61,14 @@ function lockReason(d) {
 function deviceCard(d) {
   const locked = lockReason(d);
   const tags = [
-    d.isImage ? badge('Sample disk', 'blue') : badge(d.interface || d.type || 'Disk'),
+    d.isImage ? badge('Sample disk', 'blue') : d.removable ? badge('USB', 'blue') : badge(d.interface || d.type || 'Disk'),
     d.isBootDrive ? badge('System disk', 'warn') : '',
     d.legalHold ? badge('Legal hold', 'bad') : '',
   ].join('');
   const files = d.isImage ? `${(d.currentFiles || []).length} files · ${(d.deletedRecoverableFiles || []).length} deleted` : (d.powerOnHours || '');
   return `
     <button class="pick ${S.selected?.id === d.id ? 'on' : ''} ${locked ? 'disabled' : ''}" data-id="${esc(d.id)}" ${locked ? 'aria-disabled="true"' : ''}>
-      <div class="pick-top"><span class="pick-kind">${icon(d.isImage ? 'disk' : 'drive', 14)}${esc(d.type)}</span><span class="pick-tags">${tags}</span></div>
+      <div class="pick-top"><span class="pick-kind">${icon(d.isImage ? 'disk' : d.removable ? 'usb' : 'drive', 14)}${esc(d.type)}</span><span class="pick-tags">${tags}</span></div>
       <div class="pick-title">${esc(d.model)}</div>
       <div class="pick-meta"><span class="mono">${esc(d.maskedSerial || d.serialNumber || '')}</span><b>${esc(d.capacity || bytes(d.capacityBytes))}</b></div>
       <div class="pick-note ${locked ? (d.legalHold ? 'bad' : 'warn') : ''}">${esc(locked || files)}</div>
@@ -73,29 +76,33 @@ function deviceCard(d) {
 }
 
 function renderDevices(body) {
-  const physical = S.devices.filter(d => !d.isImage);
-  const images = S.devices.filter(d => d.isImage);
+  const list = demo.enabled ? S.devices.filter(d => d.isImage)
+    : S.devices.filter(d => !d.isImage).sort((x, y) => (y.removable ? 1 : 0) - (x.removable ? 1 : 0));
+  if (S.selected && !list.some(x => x.id === S.selected.id)) S.selected = null;
   const d = S.selected;
+  const usable = list.filter(x => !lockReason(x)).length;
+  const empty = demo.enabled
+    ? '<div class="empty"><strong>No sample disks</strong>Create one to practise safely.</div>'
+    : `<div class="empty"><strong>Plug in a USB pendrive</strong>Then press Rescan. The system disk is always locked.
+        <div class="row"><button class="btn btn-secondary btn-sm" id="dv-scan2">${icon('refresh', 14)} Rescan</button></div></div>`;
   body.innerHTML = `
     <div class="card">
       <div class="card-head">
-        <div><div class="card-title">Which drive?</div><div class="card-sub">Drives connected to this computer, plus sample disks for safe practice.</div></div>
+        <div><div class="card-title">${demo.enabled ? 'Sample disks' : 'Drives on this computer'}</div>
+          <div class="card-sub">${demo.enabled ? 'Demo mode: file-backed disks that behave like real drives' : 'USB drives first · run WipeX as Administrator to erase'}</div></div>
         <div class="row">
-          <button class="btn btn-secondary btn-sm" id="dv-new">${icon('plus', 14)} New sample disk</button>
+          ${demo.enabled ? `<button class="btn btn-secondary btn-sm" id="dv-new">${icon('plus', 14)} New sample disk</button>` : ''}
           <button class="btn btn-secondary btn-sm" id="dv-scan">${icon('refresh', 14)} Rescan</button>
         </div>
       </div>
       <div class="card-body">
-        ${S.loading ? '<div class="empty">Scanning devices…</div>' : `
-        <div class="section-label" style="margin-top:0">Drives on this computer</div>
-        ${physical.length ? `<div class="pick-grid">${physical.map(deviceCard).join('')}</div>` : '<div class="muted small">No physical devices detected. Attach a USB drive and rescan (administrator rights are needed to erase it).</div>'}
-        <div class="section-label">Sample disks (safe to practise on)</div>
-        ${images.length ? `<div class="pick-grid">${images.map(deviceCard).join('')}</div>` : '<div class="muted small">No sample disks yet. Create one to try a real erasure safely.</div>'}`}
+        ${S.loading ? '<div class="empty">Scanning devices…</div>' : list.length ? `<div class="pick-grid">${list.map(deviceCard).join('')}</div>` : empty}
+        ${!S.loading && !demo.enabled && list.length && !usable ? '<div class="muted small" style="margin-top:10px">No USB drive found. Plug one in and press Rescan, or switch on <b>Demo mode</b> at the top to practise on a sample disk.</div>' : ''}
       </div>
     </div>
     ${d ? detailCard(d) : ''}
     <div class="row between" style="margin-top:16px">
-      <span class="muted small">${d ? `Selected: <b>${esc(d.model)}</b>` : 'Select a device to continue.'}</span>
+      <span class="muted small">${d ? `Selected: <b>${esc(d.model)}</b>` : 'Select a drive to continue.'}</span>
       <button class="btn btn-primary btn-lg" id="dv-next" ${d && !lockReason(d) ? '' : 'disabled'}>Continue ${icon('arrow', 16)}</button>
     </div>`;
 
@@ -105,8 +112,10 @@ function renderDevices(body) {
     S.selected = dev;
     render();
   }));
-  body.querySelector('#dv-scan').addEventListener('click', async () => { await loadDevices(true); render(); });
-  body.querySelector('#dv-new').addEventListener('click', newLabImage);
+  const rescan = async () => { await loadDevices(true); render(); };
+  body.querySelector('#dv-scan').addEventListener('click', rescan);
+  body.querySelector('#dv-scan2')?.addEventListener('click', rescan);
+  body.querySelector('#dv-new')?.addEventListener('click', newLabImage);
   body.querySelector('#dv-next').addEventListener('click', () => { S.step = 2; S.method = recommend(S.selected); render(); });
   body.querySelector('#dv-reset')?.addEventListener('click', resetImage);
   body.querySelector('#dv-del')?.addEventListener('click', deleteImage);
@@ -134,7 +143,8 @@ function detailCard(d) {
           ${rows.length ? `<div class="table-wrap" style="border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto"><table class="table"><tbody>${rows.map(f => `
             <tr><td class="trunc">${icon(f.del ? 'fileX' : 'file', 14)} ${esc(f.name)}</td><td class="num">${esc(f.size)}</td><td>${f.del ? badge('Deleted', 'warn') : ''}</td></tr>`).join('')}
           </tbody></table></div>` : '<div class="muted small">No readable file system — the image is blank or already erased.</div>'}`
-          : '<div class="notice warn">' + icon('alert', 16) + '<div><strong>Real device</strong>Erasure permanently destroys all data on this disk. The disk is taken offline during the job; run WipeX as administrator.</div></div>'}
+          : '<div class="notice warn">' + icon('alert', 16) + '<div><strong>Real drive</strong>Everything on it will be destroyed. Close any window that shows it before you start.</div></div>'}
+          ${d.advice ? `<div class="rec-line">${icon('star', 14)} Recommended: <b>${esc(methodName(d.advice.recommended))}</b></div>` : ''}
         </div>
       </div>
     </div>`;
@@ -199,10 +209,15 @@ function methodBlock(m, d) {
 const needsPsid = (d) => S.method === 'crypto_erase' && !d.isImage && !d.hardwareMethods?.crypto?.available && d.hardwareMethods?.opal?.available;
 
 function recommend(d) {
-  const rec = d.recommendedMethod;
+  const rec = d.advice?.recommended || d.recommendedMethod;
   const m = S.methods.find(x => x.id === rec);
   return m && rec !== 'destroy' && !methodBlock(m, d) ? rec : 'nist_800_88';
 }
+
+const methodName = (id) => S.methods.find(m => m.id === id)?.name || id;
+const FIT = { best: ['Recommended', 'ok'], good: ['Suitable', 'info'], fair: ['Works, not needed', ''],
+  avoid: ['Not advised', 'warn'], unavailable: ['Not available', ''] };
+const FIT_ORDER = ['best', 'good', 'fair', 'avoid', 'unavailable'];
 
 const METHOD_NOTES = {
   nist_800_88: 'One pass of zeros over every addressable sector, then a full read-back. The NIST baseline for Clear.',
@@ -215,44 +230,64 @@ const METHOD_NOTES = {
   ata_sanitize: 'Drive firmware erases all blocks including remapped and over-provisioned areas.',
 };
 
+function methodRow(m, d, advice) {
+  const blocked = methodBlock(m, d);
+  const fit = blocked ? 'unavailable' : (advice.fit || 'good');
+  const [label, tone] = FIT[fit];
+  const off = fit === 'unavailable';
+  return `<label class="method-row ${S.method === m.id ? 'on' : ''} ${off ? 'disabled' : ''}">
+    <input type="radio" name="mt" value="${m.id}" ${S.method === m.id ? 'checked' : ''} ${off ? 'disabled' : ''}>
+    <div class="method-main">
+      <div class="method-name">${esc(m.name)}</div>
+      <div class="method-why">${esc(blocked || advice.reason || METHOD_NOTES[m.id] || '')}</div>
+    </div>
+    <div class="method-tags">${badge(label, tone)}<span class="muted small">${m.passes ? `${m.passes} pass${m.passes > 1 ? 'es' : ''}` : 'Firmware'} · NIST ${esc(m.category)}</span>
+      ${advice.time && !off ? `<span class="method-time">${esc(advice.time)}</span>` : ''}</div>
+  </label>`;
+}
+
 function renderMethods(body) {
   const d = S.selected;
   const dual = appRef.health?.dualApproval;
-  const methods = S.methods.filter(m => m.id !== 'destroy');
+  const adv = d.advice || { methods: {}, why: [] };
+  const rec = recommend(d);
+  const fitOf = (m) => methodBlock(m, d) ? 'unavailable' : (adv.methods[m.id]?.fit || 'good');
+  const methods = S.methods.filter(m => m.id !== 'destroy')
+    .sort((x, y) => (x.id === rec ? -1 : y.id === rec ? 1 : 0) || FIT_ORDER.indexOf(fitOf(x)) - FIT_ORDER.indexOf(fitOf(y)));
+  const usable = methods.filter(m => fitOf(m) !== 'unavailable');
+  const unusable = methods.filter(m => fitOf(m) === 'unavailable');
   body.innerHTML = `
     <div class="grid cols-side">
-      <div class="card">
-        <div class="card-head"><div><div class="card-title">Sanitization method</div><div class="card-sub">Recommended for ${esc(d.type)}: <b>${esc(S.methods.find(m => m.id === recommend(d))?.name || '')}</b></div></div></div>
-        <div class="card-body"><div class="pick-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
-          ${methods.map(m => {
-            const blocked = methodBlock(m, d);
-            return `<button class="pick ${S.method === m.id ? 'on' : ''} ${blocked ? 'disabled' : ''}" data-id="${m.id}">
-              <div class="pick-top"><span class="pick-title">${esc(m.name)}</span>${m.id === recommend(d) ? badge('Recommended', 'info') : ''}</div>
-              <div class="small" style="color:var(--text-2)">${esc(METHOD_NOTES[m.id] || '')}</div>
-              <div class="pick-tags">${badge(`NIST ${m.category}`, m.category === 'Purge' ? 'blue' : '')}${m.passes ? badge(`${m.passes} pass${m.passes > 1 ? 'es' : ''}`) : badge('Firmware command')}</div>
-              ${blocked ? `<div class="pick-note warn">${esc(blocked)}</div>` : ''}
-            </button>`;
-          }).join('')}
+      <div class="stack">
+        <div class="card rec-card"><div class="card-body">
+          <div class="rec-head">${icon('star', 18)}
+            <div style="flex:1"><div class="label">Recommended for this ${esc((adv.mediaLabel || d.type || 'drive').toLowerCase())}</div>
+              <div class="rec-name">${esc(methodName(rec))}</div></div>
+            ${S.method !== rec ? '<button class="btn btn-secondary btn-sm" id="mt-use-rec">Use it</button>' : badge('Selected', 'ok')}</div>
+          <ul class="rec-why">${(adv.why || []).map(w => `<li>${esc(w)}</li>`).join('')}</ul>
+          ${adv.methods?.[rec]?.time ? `<div class="rec-time">${icon('info', 14)} Takes ${esc(adv.methods[rec].time)} for this drive. ${esc(adv.timeNote || '')}</div>` : ''}
+          ${adv.warning ? `<div class="notice bad" style="margin-top:10px">${icon('alert', 16)}<div>${esc(adv.warning)}</div></div>` : ''}
         </div></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">All methods for this drive</span><span class="card-sub">best first, each with the reason</span></div>
+          <div class="method-list">${usable.map(m => methodRow(m, d, adv.methods[m.id] || {})).join('')}</div>
+          ${unusable.length ? `<details class="more"><summary>Not available on this drive (${unusable.length})</summary>
+            <div class="method-list">${unusable.map(m => methodRow(m, d, adv.methods[m.id] || {})).join('')}</div></details>` : ''}
+        </div>
       </div>
       <div class="stack">
         <div class="card">
-          <div class="card-head"><span class="card-title">Target</span></div>
+          <div class="card-head"><span class="card-title">Target</span>${dual ? badge('Two-person rule on', 'warn') : ''}</div>
           <div class="card-body"><dl class="kv">
-            <dt>Device</dt><dd>${esc(d.model)}</dd><dt>Serial</dt><dd class="mono">${esc(d.serialNumber)}</dd><dt>Capacity</dt><dd>${esc(d.capacity)}</dd>
-          </dl></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">Authorization</span>${dual ? badge('Two-person rule on', 'warn') : ''}</div>
-          <div class="card-body stack" style="gap:12px">
-            <div class="field"><label>Operator</label><b>${esc(getOperator())}</b><span class="hint">Signed in; recorded and signed with your personal key.</span></div>
-            <div class="field"><label>Approver</label><span class="small">${dual ? 'Required: a second user signs in when you confirm.' : 'Optional: a second user may sign in when you confirm.'}</span></div>
-            ${needsPsid(d) ? `<div class="field"><label for="mt-psid">Drive PSID (32 characters, printed on the label)</label>
-              <input class="input mono" id="mt-psid" value="${esc(S.psid)}" autocomplete="off" spellcheck="false">
-              <span class="hint">Used once for the TCG Opal PSID revert; never stored.</span></div>` : ''}
+            <dt>Drive</dt><dd>${esc(d.model)}</dd><dt>Serial</dt><dd class="mono">${esc(d.serialNumber)}</dd><dt>Capacity</dt><dd>${esc(d.capacity)}</dd>
+            <dt>Operator</dt><dd>${esc(getOperator())}</dd><dt>Approver</dt><dd>${dual ? 'Required when you confirm' : 'Optional'}</dd>
+          </dl>
+          ${needsPsid(d) ? `<div class="field" style="margin-top:12px"><label for="mt-psid">Drive PSID (32 characters, printed on the label)</label>
+            <input class="input mono" id="mt-psid" value="${esc(S.psid)}" autocomplete="off" spellcheck="false">
+            <span class="hint">Used once for the TCG Opal PSID revert; never stored.</span></div>` : ''}
           </div>
         </div>
-        <div class="notice">${icon('info', 16)}<div><strong>What happens next</strong>WipeX captures sample blocks${d.isImage ? ' and plants canary blocks' : ''}, runs the passes, reads the device back against the expected pattern, then tries to recover files from it with M3. The job only passes if nothing is recoverable.</div></div>
+        <div class="muted small" style="padding:0 4px">After erasing, WipeX reads the drive back${d.isImage ? ', checks canary blocks' : ''} and tries to recover files from it. The job passes only if nothing is recoverable.</div>
       </div>
     </div>
     <div class="row between" style="margin-top:16px">
@@ -260,13 +295,8 @@ function renderMethods(body) {
       <button class="btn btn-danger btn-lg" id="mt-start" ${S.method ? '' : 'disabled'}>Start erasure</button>
     </div>`;
 
-  body.querySelectorAll('.pick').forEach(b => b.addEventListener('click', () => {
-    const m = S.methods.find(x => x.id === b.dataset.id);
-    const blocked = methodBlock(m, d);
-    if (blocked) { toast(blocked, 'bad'); return; }
-    S.method = m.id;
-    render();
-  }));
+  body.querySelectorAll('input[name=mt]').forEach(r => r.addEventListener('change', () => { S.method = r.value; render(); }));
+  body.querySelector('#mt-use-rec')?.addEventListener('click', () => { S.method = rec; render(); });
   body.querySelector('#mt-psid')?.addEventListener('input', e => { S.psid = e.target.value; });
   body.querySelector('#mt-back').addEventListener('click', () => { S.step = 1; render(); });
   body.querySelector('#mt-start').addEventListener('click', startErasure);
@@ -306,8 +336,8 @@ async function poll() {
     try {
       S.status = await api(`/api/wipe/status/${S.wipeId}`);
     } catch (e) { reportError(e); return; }
-    if (S.step === 3 && root?.classList.contains('active')) renderRun(root.querySelector('#drive-body'));
-    if (S.status.status !== 'IN_PROGRESS') return;
+    if (S.step === 3 && visible()) renderRun(root.querySelector('#drive-body'));
+    if (S.status.status !== 'IN_PROGRESS') { refreshDemo(); return; }
     await sleep(700);
   }
 }
@@ -355,7 +385,7 @@ function renderRun(body) {
         ${!running && st.status === 'COMPLETED' && S.selected && !S.selected.isImage ? `<div class="card card-pad stack" style="gap:8px">
           <div class="card-title">Use the drive again</div>
           <div class="muted small">The erased drive has no partition left, so the computer shows it as unformatted. Create one empty file system to reuse it; the certificate is not affected.</div>
-          <div style="display:flex;gap:8px"><select class="select" id="run-fs">${['exFAT', 'FAT32', 'NTFS'].map(f => `<option>${f}</option>`).join('')}</select>
+          <div style="display:flex;gap:8px"><select class="select" id="run-fs">${['exFAT', 'FAT32', ...(appRef.health?.platform === 'Darwin' ? [] : ['NTFS'])].map(f => `<option>${f}</option>`).join('')}</select>
             <button class="btn btn-secondary" id="run-format">${icon('drive', 16)} Format for reuse</button></div>
           ${S.formatted ? `<div class="small">${esc(S.formatted)}</div>` : ''}</div>` : ''}
       </div>
@@ -377,6 +407,7 @@ function renderRun(body) {
 async function issueCertificate() {
   try {
     S.cert = await api('/api/certificates/generate', { method: 'POST', body: { wipeId: S.wipeId } });
+    refreshDemo();
     S.step = 4;
     render();
   } catch (e) { reportError(e); }

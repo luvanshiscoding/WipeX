@@ -815,6 +815,9 @@ class WipeEngine:
             if transport in ("nvme",):
                 storage_type = "NVMe SSD"
                 interface = "NVMe / PCIe"
+            elif transport in ("usb", "mmc") or (hotplug and transport not in ("sata", "sas", "ata")):
+                storage_type = "USB / removable"       # USB sticks often report rotational=1
+                interface = transport.upper()
             elif solid_state:
                 storage_type = "SATA SSD"
                 interface = "SATA 3.0 (6.0 Gb/s)"

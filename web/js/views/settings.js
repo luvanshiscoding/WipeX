@@ -39,8 +39,7 @@ function userRow(u) {
 }
 
 function headHtml() {
-  const desc = 'NTRO access profiles on this workstation. There is no sign-in page in the prototype: switch profile with '
-    + '"View as" at the top right. Each profile signs its own actions with a personal key.';
+  const desc = 'NTRO access profiles, erasure policy and the workstation key. Switch profile with "View as" at the top right.';
   return `<div class="page-head"><div><h1 class="page-title">Settings</h1>`
     + `<p class="page-desc">${desc}</p></div></div>`;
 }

@@ -1,310 +1,188 @@
-# WipeX — Integrated Secure Data Erasure & Forensic Recovery
+<p align="center"><img src="web/img/wipex-logo.svg" width="92" alt="WipeX logo"></p>
 
-**Smart India Hackathon 2026 · Problem Statement SIH26149 · National Technical Research Organisation (NTRO)**
-**Theme:** Blockchain & Cybersecurity · **Category:** Software
+<h1 align="center">WipeX</h1>
 
-[![tests](https://github.com/luvanshiscoding/WipeX/actions/workflows/tests.yml/badge.svg)](https://github.com/luvanshiscoding/WipeX/actions/workflows/tests.yml)
+<p align="center"><b>Integrated Secure Data Erasure &amp; Forensic Recovery</b><br>
+Smart India Hackathon 2026 · <b>SIH26149</b> · National Technical Research Organisation (NTRO)<br>
+Blockchain &amp; Cybersecurity · Software</p>
+
+<p align="center"><a href="https://github.com/luvanshiscoding/WipeX/actions/workflows/tests.yml"><img src="https://github.com/luvanshiscoding/WipeX/actions/workflows/tests.yml/badge.svg" alt="tests"></a></p>
 
 > *Recover what must be preserved as evidence. Erase what must never be recovered. Prove both.*
 
-WipeX is one offline workstation application with three modules: a secure **drive eraser**, a secure **file and folder eraser**, and a **file carving and recovery** engine. They share case management, role-based NTRO access profiles, a tamper-evident audit log and signed reports. It runs on Windows, Linux and macOS, needs no network connection, and every erasure is verified by trying to recover data from the erased media.
+WipeX is one offline workstation application with the three modules SIH26149 asks for: a **drive eraser** (M1), a **file and folder eraser** (M2) and a **file carving and recovery** engine (M3). They share cases, role-based access, a signed audit log and signed reports. The key idea: **every erasure is verified by WipeX's own recovery engine**. A job passes only if nothing can be brought back.
 
----
-
-## 1. Problem statement
-
-> *"Design and Development of an Integrated Secure Data Erasure and Advanced File Recovery Tool for Digital Forensics and Data Sanitization"*
-
-Agencies must both **permanently destroy** sensitive data and **recover deleted evidence**. Today these are separate tools. SIH26149 asks for one integrated tool:
-
-| # | Required module | Expected capability |
-|---|---|---|
-| M1 | Secure Drive Eraser | Sanitize various storage types, with verification and compliance reporting |
-| M2 | Secure File & Folder Eraser | Selective deletion of files and folders with **metadata removal**, across file systems |
-| M3 | Advanced File Carving & Recovery | Restore deleted files from damaged or formatted media using multiple techniques |
-
-Also required: audit logging, reporting, a dashboard, support for multiple devices and file systems, technical documentation and **performance evaluation**.
-
-## 2. How WipeX meets each requirement
-
-| Requirement | WipeX implementation | Status |
-|---|---|---|
-| Drive erasure for various storage types | NIST SP 800-88 Clear overwrites (1 / 3 / 35 pass, keyed random) and Purge through the drive's own controller: NVMe Sanitize (crypto / block erase), ATA Security Erase, TCG Opal PSID revert | ✅ overwrite · 🟡 firmware purge (see §5) |
-| Verification | Full read-back against the expected pattern, canary blocks, and a **recovery attempt** by M3 on the erased media | ✅ |
-| Compliance reporting | ECDSA-signed certificate (JSON + PDF + QR), BSA 2023 §63 annexure draft | ✅ |
-| File and folder erasure with metadata removal | In-place overwrite, random renames, timestamp scrub, NTFS alternate data streams, Linux/macOS extended attributes, reuse of the directory entries that held the names (FAT/exFAT keep deleted names), OS trace cleanup (Recent items, Jump Lists, thumbnails, Finder metadata, download records), optional clearing of the NTFS change journal; afterwards a **drive check** reads the volume directly for the original names and content | ✅ |
-| Multiple file systems | NTFS, FAT/exFAT, ext2/3/4, HFS+, APFS/Btrfs/ReFS detection; Sleuth Kit parsing for NTFS, FAT, exFAT, ext, HFS+, ISO 9660 | ✅ |
-| Recovery with multiple techniques | (1) file-system metadata via The Sleuth Kit, (2) signature carving with full structural validation of 8 format families, (3) fragment reassembly for PNG, ZIP and JPEG | ✅ |
-| Damaged / formatted media, evidence formats | Any drive or USB stick by drive letter (whole drive or one folder), raw images, raw devices (read-only) and **E01 (Expert Witness)** images; evidence acquisition to raw or E01 with SHA-256 + MD5 | ✅ |
-| Audit logging | SHA-256 hash chain; every entry signed by the workstation key **and** the acting profile's personal key | ✅ |
-| Dashboard and multi-user operation | Web UI (desktop window or browser) that opens straight into an NTRO access profile; *View as* switches between four roles: Lab Administrator, Forensic Investigator, Sanitization Officer, Auditor | ✅ |
-| USB drives and portable media | Pendrives, memory cards and portable disks in FAT32, exFAT or NTFS: recover deleted files by drive letter, permanently delete files and folders, erase the whole drive and format it for reuse | ✅ |
-| Performance evaluation | Built-in benchmark: recall, precision and throughput against ground truth, for raw and E01 images | ✅ lab image · planned: public datasets |
-
-## 3. What sets WipeX apart
-
-- **Verification by recovery.** After erasing, WipeX runs its own recovery engine against the media. A drive erasure passes only if the pattern read-back matches, every canary block is gone and nothing can be recovered. A file erasure passes only if The Sleuth Kit, reading the volume directly, finds neither the original names nor the content, and on Windows the NTFS change journal no longer names the files. When the volume cannot be read directly (no Administrator / root rights, or a copy-on-write file system), the result says so instead of claiming a pass.
-- **Deleted names really gone.** FAT and exFAT, the file systems on most USB sticks and memory cards, keep a deleted file's name in its folder. WipeX reuses those directory entries and then reads the drive back. On FAT32 a normal delete left 10 of 10 names and 8 of 8 files recoverable; after WipeX, none (see §6).
-- **Fragmented photos recovered.** JPEG has no checksums, so WipeX checks the compressed image data itself: every code must be valid and the image must end exactly where its header says. That locates the break in a fragmented photo and finds where it continues.
-- **Pattern-aware verification.** The final random pass is a keyed AES-256-CTR stream, so the verifier regenerates exactly what each block must contain. Entropy alone cannot tell a random wipe from encrypted data.
-- **Honest assurance for SSDs.** Before a file erasure WipeX detects the file system, media type and TRIM. It then rates the assurance as High, Limited (flash) or Not effective (copy-on-write), and points to whole-device purge when needed.
-- **Evidence lock and two-person rule.** Devices and folders under a legal hold cannot be erased. When the two-person rule is on, a second person (another profile with approval rights) must approve, and the approval is signed with their personal key and embedded in the certificate.
-- **Controlled, attributable access.** WipeX opens only on the workstation it runs on: the engine accepts local requests only, and each NTRO access profile is an account with its own role and personal ECDSA key. Audit entries, certificates and approvals carry both the workstation signature and the profile's signature.
-- **Real hardware on three operating systems.** WipeX probes physical disks on Windows, Linux and macOS and reads real health data (NVMe health log, SMART). The system disk is always refused, and every firmware method checks whether it can run on that controller before starting.
-- **Offline by design.** One local process with a local SQLite database and bundled fonts. The API accepts only local requests. See the [desktop application plan](docs/DESKTOP_APP_PLAN.md).
-
-## 4. Use cases
-
-| Who | Situation | How WipeX handles it |
-|---|---|---|
-| Forensic examiner (cyber cell, FSL) | A seized USB stick or disk image may hold deleted photos and documents | *Cases* → acquire the drive as E01 (SHA-256 + MD5, re-verified) → *Recover Files* → deleted files by name, carved files and rebuilt fragments → PDF report with the hash of every file and a BSA §63 annexure |
-| IT / asset disposal team | Laptops and drives leave the organisation or are reassigned | *Erase Drive* → NIST 800-88 Clear or the drive's own firmware purge → read-back, canary and recovery checks → signed certificate with QR code |
-| Data owner / DPO | Specific files must be destroyed on a machine that stays in use (data spill, DPDP Act erasure request) | *Delete Files* → overwrite, names and metadata removed → drive check proves names and content are gone → file-erasure report |
-| Supervisor / auditor | Someone must confirm what was done, by whom, and that nothing was altered | *Audit Log* → verify the signed hash chain; *Verify* → check any certificate by ID or QR code |
-| Legal / investigation lead | Evidence must not be destroyed while a case is open | *Cases* → legal hold on a device or folder: erasure is refused; the two-person rule needs a second, signed approval |
-| Trainer | Examiners practise recovery and erasure without real evidence | Built-in lab disks with ground truth; the benchmark shows recall, precision and speed |
-
----
-
-## 5. Platform support
-
-| Capability | Windows 10/11 | Linux | macOS |
-|---|---|---|---|
-| Device discovery and health | ✅ Get-Disk / reliability counters / NVMe health log | ✅ lsblk + smartctl | ✅ diskutil |
-| Overwrite erasure of physical disks and images | ✅ (Administrator) | ✅ (root) | ✅ (root, raw `/dev/rdiskN`) |
-| NVMe Sanitize (crypto / block erase) | 🟡 through the Windows NVMe driver; not available behind Intel RST/VMD drivers | 🟡 nvme-cli | — |
-| ATA Security Erase | — (firmware freezes it; use Linux) | 🟡 hdparm | — |
-| TCG Opal PSID revert | 🟡 sedutil-cli | 🟡 sedutil-cli | — |
-| File erasure: streams / extended attributes | ✅ NTFS ADS | ✅ user xattrs | ✅ xattrs |
-| OS trace cleanup | ✅ Recent items, Jump Lists | ✅ recently-used, thumbnails | ✅ .DS_Store, quarantine records, QuickLook |
-| Recovery (Sleuth Kit + carving), E01 | ✅ | ✅ | ✅ |
-| Recover from a drive letter or one folder | ✅ (Administrator) | via device path (`/dev/sdX1`) | via device path |
-| Drive check after file erasure (The Sleuth Kit) | ✅ Administrator; NTFS and FAT32 tested | ✅ root; ext4, FAT32, exFAT and NTFS tested | 🟡 root; HFS+, FAT and exFAT (APFS cannot be read directly) |
-| NTFS change-journal search + clear | ✅ | — | — |
-| Android (ADB) | ✅ | ✅ | ✅ |
-
-✅ implemented and tested · 🟡 implemented; needs sacrificial hardware for validation · — not offered on that OS (WipeX explains why and suggests an alternative).
-
-The full test suite passes on **Windows 11** and **Linux (Ubuntu 26.04)**, and in GitHub Actions on Windows, Ubuntu and macOS. macOS runs in the CI workflow; it has not yet been run on a physical Mac. Firmware sanitize commands have not yet been run on sacrificial drives. Every firmware purge is followed by the same independent read-back verification, so a purge that silently did nothing fails verification.
-
-## 6. Measured results
-
-64 MB FAT16 lab image with 14 planted files (live, deleted, fragmented, orphaned), matched by SHA-256 against ground truth:
-
-| Technique | Result | Notes |
-|---|---|---|
-| File system (The Sleuth Kit) | 6 of 7 deleted files intact | The 7th is fragmented across reused clusters and is reported as damaged |
-| Carving | 13 of 13 carvable files, **0 false positives** | 3 fragmented files (PNG, ZIP, JPEG) reassembled byte-exact; 80–105 MB/s |
-| **Combined** | **9 of 9 deleted and orphaned files** | Same result when the image is read from an E01 container |
-| Erasure verification | 0 of 16 canaries and 0 files recoverable after NIST Clear, DoD 3-pass and random pass | A deliberately incomplete wipe is rejected (automated test) |
-
-E01 support was cross-checked in both directions: images written by WipeX are read correctly by libewf, and E01 sets written by `ewfacquire` (single and multi-segment) are read correctly by WipeX.
-
-**Real file systems.** Files were deleted by the operating system's own drivers, then recovered by WipeX:
-
-| Test | Result |
+| At a glance | |
 |---|---|
-| FAT32 volume written and deleted by Linux | 4 of 4 deleted files recovered byte-exact (file system and deep scan) |
-| NTFS volume written and deleted by Linux (ntfs-3g) | 4 of 4 recovered byte-exact by the deep scan (the driver clears the file's block map on delete) |
-| FAT32 and NTFS volumes mounted by Windows, read by drive letter | All deleted names found; content reported as *erased by the drive* because the virtual disk, like an SSD, trims freed blocks |
-| JPEG split in two, carved from a raw image | Rebuilt byte-exact when the data between the pieces is random, compressed, zero-filled or text, or another photo with restart markers. Not detected when it is another photo without restart markers (the carved file keeps that data). Nothing is carved when the second piece is missing |
+| Recovery accuracy | 13 of 13 carvable files, **0 false positives**, 3 fragmented files rebuilt byte-exact; files come back **after a quick format**; every file gets a **confidence score** |
+| Erasure proof | After NIST Clear: 0 of 16 canary blocks and 0 files recoverable; a deliberately incomplete wipe is **rejected** |
+| File deletion | FAT32 normal delete: 10 names and 8 files recoverable → after WipeX: **nothing** (checked by reading the drive directly) |
+| Safety | System disk always refused · legal holds · two-person rule · links and junctions never followed · demo mode that cannot touch a real drive |
+| Runs on | Windows 10/11, Linux, macOS · **no network needed** (automated test blocks every connection) |
+| Quality | 52 automated tests on Windows, Linux and macOS (GitHub Actions) |
 
-**Deleting files for good.** The same folder (8 files in two levels) was deleted normally and with WipeX, then the volume was read directly with The Sleuth Kit:
+---
+
+## 1. The problem and how WipeX answers it
+
+Agencies must both **permanently destroy** sensitive data and **recover deleted evidence**, and today they use separate tools for each. SIH26149 asks for one integrated tool.
+
+| Requirement | What WipeX does |
+|---|---|
+| **M1 · Drive eraser** for HDD, SSD, USB, memory cards | NIST SP 800-88 overwrite (1, 3 or 35 passes, keyed random) and firmware purge (NVMe Sanitize, ATA Security Erase, TCG Opal PSID revert). A **method advisor** ranks all eight methods for the selected drive and says why: USB sticks get one verified pass (firmware commands cannot pass the USB bridge), NVMe gets crypto erase, a failing drive gets a destroy warning |
+| Verification and compliance | Full read-back against the expected pattern, canary blocks, then an **M3 recovery attempt** on the erased media → ECDSA-signed certificate (PDF with QR code) and a draft BSA 2023 §63 annexure |
+| **M2 · File and folder eraser** with metadata removal | Pick files in an Explorer/Finder-style browser → content overwritten, names scrambled, timestamps reset, NTFS alternate data streams and extended attributes removed, deleted directory entries reused (FAT/exFAT), OS traces cleaned (Recent items, Jump Lists, thumbnails, Finder metadata), NTFS change journal cleared → a **drive check** reads the volume directly and looks for the original names and content |
+| **M3 · Recovery** from damaged or formatted media, several techniques | (1) file-system metadata with The Sleuth Kit, including files inside deleted folders; (2) signature carving with full structural validation of 8 format families; (3) fragment rebuild for JPEG, PNG and ZIP, accepted only when the format's own checksum or decoder agrees; each file gets a **confidence score**. Sources: USB drive or disk by letter, one folder, raw image, **E01** evidence |
+| Multiple file systems and devices | NTFS, FAT12/16/32, exFAT, ext2/3/4, HFS+, ISO 9660 (read); APFS, Btrfs, ReFS detected and rated honestly; HDD, SATA/NVMe SSD, USB sticks, memory cards, Android (ADB) |
+| Audit, reporting, dashboard | SHA-256 hash-chained audit log signed by the workstation **and** the acting profile; PDF reports for every job; dashboard with four NTRO roles |
+| Performance evaluation | Built-in benchmark: recall, precision and throughput against ground truth (raw and E01) |
+
+## 2. What sets WipeX apart
+
+- **Erasure proven by recovery.** Other tools write zeros and trust it. WipeX then attacks its own result with the M3 engine: the job passes only if the read-back matches, every canary is gone and nothing is recoverable. When the drive cannot be read directly, the report says so instead of claiming a pass.
+- **The SSD trap handled.** WipeX detects SSDs, TRIM and copy-on-write file systems. It rates file-level deletion there as *Limited* or *Not effective* and points to a whole-drive purge. It does not pretend that overwriting a file on flash is enough.
+- **Deleted names really gone.** FAT and exFAT (most USB sticks) keep a deleted file's name. WipeX reuses those entries and reads the drive back to prove it.
+- **Fragmented and formatted media.** Split photos are rebuilt by checking the JPEG image data itself. After a quick format, carving still returns the files byte-exact, each with a confidence score.
+- **Evidence cannot be destroyed by accident.** Legal holds block erasure of case devices and folders. The two-person rule adds a second, signed approval. Symbolic links and junctions are removed as links and never followed.
+- **Attributable and offline.** Each NTRO access profile has its own ECDSA key. The engine accepts requests from this computer only, and nothing is fetched from the internet.
+
+## 3. Try it in five minutes
+
+```bash
+pip install -r requirements.txt     # FastAPI, cryptography, pytsk3 (The Sleuth Kit), ReportLab, Pillow
+npm install && npm run build        # builds the UI into dist/ (fonts bundled, no CDN)
+python wipex.py                     # opens WipeX on http://127.0.0.1:8000  (--window: own desktop window)
+```
+
+Or double-click **`WipeX.cmd`** (Windows, asks for Administrator) or **`WipeX.command`** (macOS, asks for your password). On Linux, run `sudo python3 wipex.py`. Administrator or root rights are needed only to read and erase drives directly.
+
+WipeX opens straight into the **NTRO Lab Administrator** profile; there is no sign-in page for evaluators. *View as* (top right) switches to the Forensic Investigator, Sanitization Officer or Auditor profile, and the menu then shows only what that role may do.
+
+**Demo mode (no pendrive needed).** Switch on **Demo mode** in the top bar. Every screen then shows only sample disks and sample files, and the engine refuses anything else. The Overview lists six steps, ticked from the audit log:
+
+1. **Recover Files** → sample disk → *Deep scan*: deleted files return, including rebuilt fragments. Then *Quick-format this disk* and scan again: the files still come back, with confidence scores.
+2. **Erase → Selected files & folders** → *Create sample files* → *Permanently delete* → *no trace found*.
+3. **Erase → Whole drive** → `lab-disk-01`: the recommended method is preselected with its reasons → read-back, canary and recovery checks.
+4. **Issue certificate** → PDF with QR code.
+5. **Verify Certificate** → authentic.
+6. **Audit Log** → chain intact.
+
+**With a USB pendrive** (demo mode off, any FAT32, exFAT or NTFS stick whose contents you do not need):
+
+| Step | Where | Result |
+|---|---|---|
+| 1 | Copy photos and documents to the stick, delete them in Explorer / Finder | They look gone |
+| 2 | **Recover Files** → the stick (USB drives listed first) → *Deep scan* | They come back, by name, with condition and confidence |
+| 3 | **Erase → Selected files & folders** → tick a folder on the stick → *Review* → *Permanently delete* | *Permanently deleted: no trace found* |
+| 4 | **Recover Files** → scan again | The erased files do not come back |
+| 5 | **Erase → Whole drive** → the stick → *NIST 800-88 Clear* (recommended) | Verified → signed certificate → *Format for reuse* |
+| 6 | **Verify Certificate** · **Audit Log** | Certificate authentic · chain intact |
+
+Explorer or an antivirus scan holding the stick open is handled: WipeX dismounts the volume and then locks it.
+
+## 4. Screenshots
+
+| | |
+|---|---|
+| ![Overview](docs/images/overview.png) **Overview**: the three modules, recent activity, workstation status | ![Erase selected files](docs/images/file-browser.png) **Erase → Selected files**: Explorer-style browser, sample files in demo mode |
+| ![Recovery after a format](docs/images/recover-formatted.png) **Recovery after a quick format**, with confidence scores | ![Method advisor](docs/images/method-advisor.png) **Erase → Whole drive**: every method ranked for this drive, with the reason and the time |
+
+Every job produces a PDF: a [sample certificate](docs/images/certificate.png) with the verification evidence, integrity hash and QR code, followed by a draft BSA 2023 §63 annexure.
+
+## 5. Measured results
+
+**Recovery** (64 MB FAT16 lab image, 14 planted files, matched by SHA-256 against ground truth):
+
+| Technique | Result |
+|---|---|
+| File system (The Sleuth Kit) | 6 of 7 deleted files intact (the 7th is reported as damaged: its clusters were reused) |
+| Carving | 13 of 13 carvable files, **0 false positives**; 3 fragmented files (PNG, ZIP, JPEG) rebuilt byte-exact; 80–105 MB/s |
+| Combined | **9 of 9** deleted and orphaned files; the same from an E01 container |
+| After a quick format | The file system lists nothing; carving returns every photo and document byte-exact |
+| Real drives (Windows, virtual USB disks) | A folder of 6 files deleted by Windows: 6 of 6 recovered **by name** on FAT32, exFAT and NTFS |
+
+**Deleting files for good** (the same folder deleted normally, then with WipeX; the volume read directly with The Sleuth Kit):
 
 | Volume | Normal delete leaves | After WipeX |
 |---|---|---|
-| FAT32, Windows (virtual USB disk) | 10 names, 8 files recoverable | nothing |
-| FAT32, Linux | 10 names, 8 files recoverable | nothing |
-| exFAT, Linux | 10 names, 8 files recoverable | nothing |
-| NTFS, Windows | 1 name; 38 change-journal records name the files | nothing (journal cleared by WipeX) |
-| NTFS, Linux (ntfs-3g) | 1 name | nothing |
-| ext4, Linux | nothing visible (the kernel wipes deleted entries) | nothing |
+| FAT32 (Windows and Linux) | 10 names, 8 files recoverable | nothing |
+| exFAT (Linux) | 10 names, 8 files recoverable | nothing |
+| NTFS (Windows) | 1 name, 38 change-journal records | nothing |
+| ext4 (Linux) | nothing visible | nothing |
 
-Without WipeX's reuse of directory entries, 4 names (Windows) and 6 names (Linux) still remained on FAT32.
+**Erasure and speed** (Windows 11): after NIST Clear, DoD 3-pass and a random pass, 0 of 16 canaries and 0 files are recoverable. A 512 MB drive held open by another program is erased and verified in 9.7 s. Deleting sample files on the 222 GB system drive, including the drive check, takes 31 s; on a USB stick 1–2 s. For a whole drive, the method advisor estimates the time before starting (a 32 GB stick at 20 MB/s: about 30 min for NIST Clear).
 
-## 7. Architecture
+## 6. Architecture
 
 ```
- web/  UI in vanilla JS, served by the engine; own desktop window (pywebview) or any local browser
-       Overview · Recover Files · Delete Files · Erase Drive · Cases · Audit Log · Verify · Settings
-                                 │  REST / JSON, this computer only, one session per access profile
- engine/main.py  FastAPI ────────┼──────────────────────────────────────────────────────────────────
-   erasure.py        M1  methods, keyed passes, read-back, canaries, recovery attempt, certificates, reuse format
-   hw_sanitize.py    M1  firmware purge per OS (NVMe Sanitize, ATA, Opal), NVMe identify / health
-   file_eraser.py    M2  storage assessment, ADS / xattrs, renames, directory-entry reuse, trace cleanup, drive check
-   recovery/         M3  Sleuth Kit recovery · structure-validated carving · fragment reassembly (PNG, ZIP, JPEG)
-   ewf.py                E01 reader and writer (pure Python)
-   cases.py              cases, evidence acquisition (raw / E01), legal holds, two-person rule
-   users.py              NTRO access profiles, roles, sessions, personal signing keys, signed approvals
-   audit_log.py          SHA-256 hash chain, workstation + personal ECDSA signatures
-   reports.py            PDF certificate / recovery / file-erasure reports, BSA §63 annexure
-   benchmark.py          recall / precision / throughput against ground truth
-   wipe_engine.py        device probing (Windows, Linux, macOS), USB and Android
+ web/   vanilla-JS UI served by the engine; own desktop window (pywebview) or any local browser
+        Overview · Recover Files · Erase (whole drive | selected files) · Cases · Audit Log · Verify Certificate
+                                 │  REST / JSON · 127.0.0.1 only · one session per NTRO access profile
+ engine/main.py  FastAPI ────────┼─────────────────────────────────────────────────────────────────────
+   erasure.py · advisor.py · hw_sanitize.py   M1  overwrite / firmware purge, method advice, read-back, certificates
+   file_eraser.py                             M2  storage assessment, overwrite, metadata and trace removal, drive check
+   recovery/  (fs_recovery, carver, jpeg_frag) M3  The Sleuth Kit, validated carving, fragment rebuild, confidence
+   cases.py · users.py · audit_log.py         shared: cases, E01 acquisition, legal holds, roles, signed hash chain
+   reports.py · benchmark.py · demo.py        PDF reports + BSA §63 annexure, accuracy benchmark, demo mode
                                  │
- SQLite · workspace/ (images, evidence, recovered files, reports) · keys/   (in the WipeX folder, git-ignored)
+ SQLite · workspace/ (images, evidence, recovered files, reports) · keys/        all local, git-ignored
 ```
-
-Design details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md) · Desktop packaging: [docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md)
-
-### Workflows
 
 ```mermaid
-flowchart TD
-    A(["Open WipeX as an NTRO access profile<br/>(View as: role-based)"]) --> B{"Choose a module"}
-
-    B --> R1["M3 · Recover Files<br/>drive letter, folder, image or E01 evidence"]
-    R1 --> R2["Quick scan: file system (The Sleuth Kit)<br/>Deep scan: + signature carving"]
-    R2 --> R3["Deleted files with content status<br/>carved files, rebuilt fragments (PNG, ZIP, JPEG)"]
-    R3 --> R4(["Recovered files + PDF report<br/>SHA-256 of every file, BSA §63 annexure"])
-
-    B --> F1["M2 · Delete Files"]
-    F1 --> F2["Analyze: file system, SSD/TRIM, assurance level<br/>hidden streams, extended attributes, OS traces"]
-    F2 --> G2{"Legal hold?<br/>Two-person rule?"}
-    G2 -- "under legal hold" --> X2(["Refused"])
-    G2 -- "approved or not required" --> F3["Overwrite, rename 3x, reset timestamps, delete<br/>reuse directory entries, clean OS traces"]
-    F3 --> F4["Drive check: read the volume directly<br/>original names? content? NTFS change journal?"]
-    F4 --> F5(["PASS · TRACES_REMAIN · ERASED_UNVERIFIED · PARTIAL<br/>PDF report"])
-
-    B --> D1["M1 · Erase Drive"]
-    D1 --> D2["Device probe: system disk refused<br/>firmware capabilities read from the controller"]
-    D2 --> G1{"Legal hold?<br/>Two-person rule?"}
-    G1 -- "under legal hold" --> X1(["Refused"])
-    G1 -- "approved or not required" --> D3["NIST 800-88 overwrite or firmware purge"]
-    D3 --> D4["Pattern read-back, canary blocks<br/>M3 recovery attempt on the erased media"]
-    D4 --> D5(["Certificate: workstation + personal ECDSA signatures<br/>PDF with QR code, BSA §63 draft<br/>then optional: format the drive for reuse"])
-
-    R4 --> L[("Audit log<br/>SHA-256 chain, signed per user")]
-    F5 --> L
-    D5 --> L
+flowchart LR
+    A(["Open WipeX<br/>NTRO access profile"]) --> R["M3 · Recover Files<br/>file system · carving · fragments"]
+    A --> E{"Erase"}
+    E --> D["M1 · Whole drive<br/>advisor → overwrite / firmware purge"]
+    E --> F["M2 · Selected files<br/>overwrite · names · streams · traces"]
+    D --> G{"Legal hold?<br/>two-person rule?"}
+    F --> G
+    G -- "held" --> X(["Refused and logged"])
+    G -- "allowed" --> V["Verify by recovery<br/>read-back · canaries · M3 scan · drive check"]
+    R --> P(["Signed PDF report<br/>hashes · confidence · BSA §63"])
+    V --> C(["Signed certificate / report<br/>QR code · BSA §63"])
+    P --> L[("Audit log<br/>SHA-256 chain, signed per profile")]
+    C --> L
 ```
 
-## 8. Getting started
+Design details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md) · desktop packaging: [docs/DESKTOP_APP_PLAN.md](docs/DESKTOP_APP_PLAN.md)
 
-**Prerequisites:** Python 3.10 or newer (CI uses 3.11) and Node.js 18+ (Node is needed only to build the UI once).
+## 7. Platform support
 
-```bash
-pip install -r requirements.txt     # fastapi, cryptography, pytsk3 (The Sleuth Kit), reportlab, Pillow
-npm install && npm run build        # builds the UI into dist/ (fonts included, no CDN)
+| Capability | Windows 10/11 | Linux | macOS |
+|---|---|---|---|
+| Overwrite erasure of disks, USB drives, images | ✅ Administrator | ✅ root | ✅ root |
+| Firmware purge (NVMe Sanitize, ATA, Opal) | 🟡 NVMe, Opal | 🟡 nvme-cli, hdparm, sedutil | — |
+| File erasure with streams / xattrs and OS traces | ✅ | ✅ | ✅ |
+| Drive check after file erasure | ✅ NTFS, FAT32, exFAT | ✅ ext4, FAT32, exFAT, NTFS | 🟡 HFS+, FAT, exFAT |
+| Recovery (Sleuth Kit + carving + E01) from USB drives | ✅ by drive letter | ✅ lsblk | ✅ diskutil (APFS cannot be read directly) |
+| Format for reuse | exFAT, FAT32, NTFS | exFAT, FAT32, NTFS | exFAT, FAT32 |
+| Launcher · network needed | `WipeX.cmd` · none | `sudo python3 wipex.py` · none | `WipeX.command` · none |
 
-python wipex.py                     # starts WipeX on http://127.0.0.1:8000 and opens it
-python wipex.py --window            # same, in its own desktop window (pywebview)
-```
+✅ implemented and tested · 🟡 implemented, awaiting validation on sacrificial hardware · — not offered (WipeX explains why). The test suite passes on Windows 11 and Ubuntu, and in GitHub Actions on Windows, Ubuntu and macOS. It has not yet been run on a physical Mac. Every firmware purge is followed by the same independent read-back, so a purge that silently did nothing fails verification.
 
-There is **no sign-in page** in this prototype. WipeX opens straight into the **NTRO Lab Administrator** profile; *View as* (top right) switches to another NTRO access profile, and the menu shows only what that role may do:
+## 8. Security and responsible use
 
-| Access profile | Can do |
-|---|---|
-| NTRO Lab Administrator | Every module, the two-person rule and settings |
-| NTRO Forensic Investigator | Cases, evidence acquisition, recovery, legal holds; approves erasures |
-| NTRO Sanitization Officer | Drive and file erasure, certificates, lab images |
-| NTRO Auditor | Read-only: cases, audit log, reports, certificate verification |
+WipeX is dual-use: recovery is for **authorised forensic examination** only, and erasure must never destroy evidence. It enforces this with:
 
-Access stays controlled without passwords: a profile can be opened only through the WipeX engine on this computer (it rejects requests from any other host), and every action is recorded in the audit log and signed with that profile's own key. Named accounts with passwords are still available through the API for a production deployment.
+- role-based NTRO access profiles, each with its own signing key;
+- legal holds;
+- the two-person rule, with a signed approval by a second profile;
+- a hash-chained audit log signed per profile;
+- an API that rejects requests from any other computer.
 
-WipeX also creates two **lab disk images**: FAT16 disks containing live, deleted, fragmented and orphaned files, with ground truth. Every module can be tried on them safely:
+The system disk, system folders, user-profile folders and WipeX itself are always refused. The prototype opens without a sign-in page for evaluators. The same engine supports named accounts with scrypt-hashed passwords for deployment (`/api/auth/login`, `/api/users`).
 
-1. **Recover Files** → *Sample disk* `evidence-sample` → Scan → deleted files come back, including rebuilt fragments. Or pick a USB stick by drive letter (optionally one folder) → Quick or Deep scan → *Open recovered files*.
-2. **Delete Files** → *Create sample files* (or add your own) → Permanently delete → the result lists each trace check.
-3. **Erase Drive** → `lab-disk-01` → NIST Clear → read-back, canary and recovery checks → certificate PDF.
-4. **Cases** → new case → acquire `evidence-sample` as **E01** → place a legal hold → an erasure of the held device is refused.
-5. **Settings** → enable the two-person rule → the next erasure must be approved by a second profile (Forensic Investigator), whose signed approval goes into the certificate.
-6. **Audit Log** → verify the chain · **Verify** → check a certificate or scan its QR code.
+Tests: `python -m unittest discover -s tests -v`. They cover recovery accuracy, fragment rebuild, recovery after a format, erasure verification (an incomplete wipe must fail), tamper detection, roles, legal holds, E01, demo-mode refusals, link safety, the method advisor, and a run of every module with the network blocked.
 
-> ⚠️ Erasing a physical disk destroys all data on it and needs Administrator / root rights. The running system disk is always refused. Practise on lab images.
+## 9. Limitations and roadmap
 
-**Windows desktop tool:** double-click **`WipeX.cmd`**. It asks for Administrator rights (needed to read and erase drives directly) and opens WipeX in its own window.
+- File-level overwrite cannot reach an SSD's spare blocks. WipeX says so and recommends a whole-drive purge.
+- APFS, Btrfs, ReFS and ZFS (copy-on-write) cannot be read directly by The Sleuth Kit.
+- Not detected yet: a JPEG split by another photo without restart markers.
+- Before the Grand Finale: benchmark on public data sets (DFRWS, NIST CFReDS); validate firmware purges on sacrificial drives; test on a physical Mac; build installers and a bootable USB; add real sign-in for production.
 
-**Linux / macOS:** run `sudo python3 wipex.py` when you want to erase drives, recover from a device path (`/dev/sdb1`, `/dev/disk4s1`) or have file erasures checked on the drive. Without root everything else works, and file erasures are reported as *erased, drive check not run*.
+## 10. Standards
 
-**Development mode:** `python -m uvicorn --app-dir engine main:app --port 8000` together with `npm run dev` (UI with live reload on http://localhost:5173).
+NIST SP 800-88 Rev. 2 (media sanitization) · IEEE 2883-2022 (sanitizing storage) · NIST SP 800-86 (forensic techniques) · TCG Opal 2.0 · DoD 5220.22-M (legacy pattern) · Bharatiya Sakshya Adhiniyam 2023 §63 (electronic records) · Digital Personal Data Protection Act 2023.
 
-### Testing with a USB pendrive
-
-This is the quickest way to see all three modules on real hardware. Use a pendrive, memory card or portable disk whose contents you do not need; FAT32, exFAT and NTFS all work. On Windows start WipeX with **`WipeX.cmd`** (Administrator), on Linux with `sudo python3 wipex.py`.
-
-| Step | Where | What happens |
-|---|---|---|
-| 1. Put a few photos and documents on the stick, then delete them normally | Windows Explorer / file manager | The files look gone |
-| 2. Recover them | **Recover Files** → *Drive / USB* → pick the stick → *Quick scan* (seconds) or *Deep scan* (searches every block, also after a format) | Deleted files come back by name with their condition; carved files and rebuilt fragments are listed too → *Open recovered files*, *Report* |
-| 3. Delete a folder for good | **Delete Files** → *Add files or folders* (or paste `E:\Folder`) → *Permanently delete* | Overwrite, renames, directory entries reused, then the drive check: *Permanently deleted: no trace found* |
-| 4. Prove it | **Recover Files** → scan the stick again | The files deleted with WipeX do not come back |
-| 5. Erase the whole stick | **Erase Drive** → pick the stick (the system disk is locked) → *NIST 800-88 Clear* | Pattern read-back, canary and recovery checks → *Issue certificate* (PDF with QR code) |
-| 6. Use the stick again | **Erase Drive** → *Format for reuse* (exFAT, FAT32 or NTFS) | One partition and an empty file system; the certificate is unaffected |
-| 7. Check the record | **Audit Log** → *Verify chain* · **Verify** → certificate ID | Chain intact; certificate authentic |
-
-Close any Explorer window that shows the stick before step 5: WipeX locks the stick's volumes while it writes and says so if one is in use. A few pendrives and all SSDs erase freed blocks by themselves (TRIM); WipeX then reports deleted content as *Erased by the drive* instead of pretending to recover it.
-
-### Repository layout
-
-```
-WipeX/
-├── wipex.py              start WipeX (browser or --window); WipeX.cmd does the same on Windows as Administrator
-├── engine/               Python engine: FastAPI app (main.py), erasure, file eraser, users, audit, reports
-│   └── recovery/         Sleuth Kit recovery, carving, format validators, JPEG fragment reassembly
-├── web/                  user interface (index.html, js/, css/), built by Vite into dist/
-├── tests/                automated tests (python -m unittest discover -s tests)
-├── docs/                 specification and desktop packaging plan
-└── requirements.txt · package.json · vite.config.js
-```
-
-### Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-The 44 tests cover:
-- **Recovery:** Sleuth Kit reads the generated FAT16; carving is byte-exact, including fragment reassembly, with no false positives; corrupted PNG, ZIP and JPEG are rejected.
-- **JPEG fragments:** the image-data check accepts baseline, 4:4:4, grayscale, optimized-table and restart-marker JPEGs; photos split by random, zero-filled, text or restart-marker JPEG data are rebuilt byte-exact; nothing is carved when the second piece is missing.
-- **Erasure verification:** an incomplete wipe must fail; a random wipe must pass.
-- **Signatures:** certificate and audit-chain tamper detection; personal signatures, including after a password reset.
-- **Access control:** NTRO access profiles open without a password only through the local engine, keep their roles and sign their own actions; role enforcement on the API; two-person approval by a second profile or password account.
-- **Evidence handling:** legal holds; E01 round trip, multi-segment sets and corruption detection; acquisition to E01 followed by recovery.
-- **Recovery on real volumes:** scans limited to one folder, trimmed (zeroed) files reported as erased by the drive, and the drive check after deletion.
-- **File eraser and platform helpers:** file-eraser guards (including drive roots and mount points), ADS and xattr removal, verdicts with and without the drive check, NVMe Identify/health parsing.
-- **Benchmark:** recall and precision.
-
-GitHub Actions runs the same suite on Windows, Linux and macOS.
-
-## 9. Roadmap to the Grand Finale
-
-- Benchmark on public forensic test images (DFRWS carving challenges, NIST CFReDS) using the truth-file format in `benchmark.py`.
-- Validate NVMe Sanitize, ATA Security Erase and Opal PSID revert on sacrificial drives; publish the tested models.
-- JPEG fragments separated by another photo without restart markers (needs a pixel-continuity check); more carved formats (Office binary, MP3, RAW photos).
-- Run the drive check on a physical Mac (HFS+, exFAT); APFS needs a different reader.
-- Desktop installers for Windows, Linux and macOS and a bootable live USB ([plan](docs/DESKTOP_APP_PLAN.md)).
-- Privilege separation: an elevated worker process only for raw-device jobs.
-
-## 10. Standards and legal references
-
-- **NIST SP 800-88 Rev. 2**: media sanitization (Clear / Purge / Destroy)
-- **IEEE 2883-2022**: sanitizing storage
-- **NIST SP 800-86**: forensic techniques in incident response
-- **TCG Opal 2.0**: self-encrypting drives
-- **DoD 5220.22-M** (legacy overwrite pattern)
-- **Bharatiya Sakshya Adhiniyam 2023, §63**: certificate for electronic records
-- **Digital Personal Data Protection Act 2023**: erasure obligations
-
-## 11. Security and responsible use
-
-WipeX is dual-use by design. Recovery is for **authorised forensic examination** only, and erasure must never be used to destroy evidence. Five controls enforce this:
-- role-based NTRO access profiles, each with its own signing key (opened only on this workstation),
-- legal holds,
-- the two-person rule with signed approvals by a second person,
-- a hash-chained audit log signed per profile,
-- a local-only API that rejects requests from any other host.
-
-The prototype has no sign-in page so that evaluators can open it directly. For deployment the same engine supports named accounts with scrypt-hashed passwords and personal keys encrypted with the password (`/api/auth/login`, `/api/users`).
-
-## 12. Third-party components
-
-| Component | Used for | Licence |
-|---|---|---|
-| The Sleuth Kit via `pytsk3` | File-system recovery | Apache 2.0 (pytsk3); TSK: CPL / IBM PL / others |
-| `cryptography` | ECDSA P-256 signatures, AES-CTR, encrypted user keys | Apache 2.0 / BSD |
-| FastAPI, Uvicorn | Local API server | MIT / BSD |
-| ReportLab | PDF reports | BSD |
-| Pillow | Image decode validation, sample content | MIT-CMU |
-| qrcode-generator | Certificate QR codes | MIT |
-| IBM Plex (via @fontsource) | Bundled UI fonts | SIL OFL 1.1 |
-| nvme-cli, hdparm, sedutil-cli (called, not bundled) | Firmware sanitize on Linux / Windows | GPL |
+Built with The Sleuth Kit (pytsk3), FastAPI, cryptography, ReportLab, Pillow and qrcode-generator; fonts are IBM Plex (SIL OFL). Firmware tools (nvme-cli, hdparm, sedutil-cli) are called when present, not bundled.

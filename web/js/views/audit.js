@@ -1,5 +1,5 @@
 /** Audit log: hash-chained, signed entries with on-demand chain verification and export. */
-import { api, apiUrl, esc, icon, reportError, short, when } from '../core.js';
+import { api, apiUrl, esc, icon, refreshDemo, reportError, short, when } from '../core.js';
 import { actionLabel } from './overview.js';
 
 const S = { entries: [], total: 0, chain: null, filter: '', open: new Set(), limit: 200 };
@@ -12,10 +12,11 @@ export async function show(el) {
 
 async function load() {
   try {
-    const [log, chain] = await Promise.all([api(`/api/audit/log?limit=${S.limit}`), api('/api/audit/verify')]);
+    const [log, chain] = await Promise.all([api(`/api/audit/log?limit=${S.limit}`), api('/api/audit/verify?step=true')]);
     S.entries = log.entries;
     S.total = log.total;
     S.chain = chain;
+    refreshDemo();
   } catch (e) { reportError(e); }
   render();
 }
@@ -28,7 +29,7 @@ function render() {
     <div class="page-head">
       <div>
         <h1 class="page-title">Audit Log</h1>
-        <p class="page-desc">Every action is appended to a hash chain and signed with the workstation key. Editing, deleting or reordering any entry breaks the chain from that point.</p>
+        <p class="page-desc">Every action is hash-chained and signed. Changing, deleting or reordering any entry breaks the chain.</p>
       </div>
       <div class="row">
         <button class="btn btn-secondary" id="au-verify">${icon('shield', 16)} Verify chain</button>

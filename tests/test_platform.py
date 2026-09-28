@@ -171,6 +171,115 @@ class Api(unittest.TestCase):
         self.assertEqual(self.c.get(f"/api/verify/{cert['certificateId']}").status_code, 200)   # public
 
 
+    def test_demo_mode_allows_only_sample_targets_and_tracks_the_walkthrough(self):
+        tok = {"Authorization": "Bearer " + self.c.post("/api/auth/profile", json={"profile": "sanitizer"}).json()["token"]}
+        r = self.c.post("/api/demo", json={"enabled": True}, headers=tok)
+        self.assertEqual(r.status_code, 200, r.text)
+        try:
+            self.assertTrue(self.c.get("/api/health").json()["demoMode"])
+            r = self.c.post("/api/wipe/start", json={"deviceId": "dev-disk-0", "methodId": "nist_800_88"}, headers=tok)
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("Demo mode", r.json()["detail"])
+            own = tempfile.mkdtemp(prefix="wipex-own-")
+            r = self.c.post("/api/files/erase", json={"paths": [own], "method": "zero"}, headers=tok)
+            self.assertEqual(r.status_code, 403)
+            self.assertTrue(os.path.isdir(own))                            # untouched
+            sandbox = self.c.post("/api/files/sandbox", headers=tok).json()["path"]
+            r = self.c.post("/api/files/erase", json={"paths": [sandbox], "method": "random", "cleanTraces": False}, headers=tok)
+            self.assertEqual(r.status_code, 200, r.text)
+            for _ in range(600):                   # the drive check reads the whole folder tree back
+                job = self.c.get(f"/api/jobs/{r.json()['jobId']}", headers=tok).json()
+                if job["status"] != "RUNNING":
+                    break
+                time.sleep(0.5)
+            self.assertEqual(job["status"], "COMPLETED", job.get("message"))
+            steps = {s["id"]: s["done"] for s in self.c.get("/api/demo", headers=tok).json()["steps"]}
+            self.assertTrue(steps["delete"])
+            self.assertFalse(steps["erase"])
+        finally:
+            self.c.post("/api/demo", json={"enabled": False}, headers=tok)
+        self.assertFalse(self.c.get("/api/health").json()["demoMode"])
+
+    def test_method_advisor_ranks_every_method_with_a_reason(self):
+        import advisor
+        import erasure
+        usb = advisor.advise({"type": "USB / removable", "interface": "USB", "removable": True, "hardwareMethods": {}})
+        self.assertEqual(usb["recommended"], "nist_800_88")
+        self.assertEqual(set(usb["methods"]), set(erasure.METHODS) - {"destroy"})
+        self.assertTrue(all(m["reason"] for m in usb["methods"].values()))
+        self.assertEqual(usb["methods"]["gutmann"]["fit"], "avoid")
+        self.assertEqual(usb["methods"]["crypto_erase"]["fit"], "unavailable")
+        nvme = advisor.advise({"type": "NVMe SSD", "interface": "NVME", "hardwareMethods": {"crypto": {"available": True}}})
+        self.assertEqual(nvme["recommended"], "crypto_erase")
+        failing = advisor.advise({"type": "Magnetic HDD", "healthStatus": "FAILING", "hardwareMethods": {}})
+        self.assertIn("destroy", failing["warning"])
+        devices = self.c.get("/api/devices", headers=self.admin).json()
+        img = next(d for d in devices if d.get("isImage"))
+        self.assertEqual(img["advice"]["recommended"], img["recommendedMethod"])
+        self.assertEqual(img["advice"]["mediaClass"], "image")
+
+
+
+class WorksOffline(unittest.TestCase):
+    """Every module runs with the network blocked: only loopback connections and lookups are allowed."""
+
+    def test_every_module_runs_without_network(self):
+        import socket
+        from fastapi.testclient import TestClient
+        import main
+        attempts = []
+        real_connect, real_lookup = socket.socket.connect, socket.getaddrinfo
+        local = ("127.0.0.1", "::1", "localhost", None)
+
+        def guarded_connect(sock, address):
+            if (address[0] if isinstance(address, tuple) else address) not in local:
+                attempts.append(address)
+                raise OSError("network blocked by the test")
+            return real_connect(sock, address)
+
+        def guarded_lookup(host, *args, **kwargs):
+            if host not in local:
+                attempts.append(host)
+                raise OSError("DNS blocked by the test")
+            return real_lookup(host, *args, **kwargs)
+
+        socket.socket.connect, socket.getaddrinfo = guarded_connect, guarded_lookup
+        try:
+            c = TestClient(main.app)
+            h = {"Authorization": "Bearer " + c.post("/api/auth/profile", json={"profile": "admin"}).json()["token"]}
+
+            def job(r):
+                self.assertEqual(r.status_code, 200, r.text)
+                for _ in range(600):
+                    j = c.get(f"/api/jobs/{r.json()['jobId']}", headers=h).json()
+                    if j["status"] != "RUNNING":
+                        return j
+                    time.sleep(0.5)
+
+            name = f"offline-{int(time.time())}"
+            lab_images.create_image(name, "sample", 16)
+            rec = job(c.post("/api/recovery/scan", json={"source": {"type": "lab", "id": f"img-{name}"}, "useCarving": True}, headers=h))
+            self.assertEqual(rec["status"], "COMPLETED")
+            self.assertEqual(c.get(f"/api/recovery/{rec['id']}/report.pdf", headers=h).status_code, 200)
+            sandbox = c.post("/api/files/sandbox", headers=h).json()["path"]
+            dele = job(c.post("/api/files/erase", json={"paths": [sandbox], "method": "random", "cleanTraces": False}, headers=h))
+            self.assertEqual(dele["status"], "COMPLETED")
+            wipe = c.post("/api/wipe/start", json={"deviceId": f"img-{name}", "methodId": "nist_800_88"}, headers=h).json()
+            for _ in range(240):
+                st = c.get(f"/api/wipe/status/{wipe['wipeId']}", headers=h).json()
+                if st["status"] != "IN_PROGRESS":
+                    break
+                time.sleep(0.5)
+            self.assertEqual(st["status"], "COMPLETED", st)
+            cert = c.post("/api/certificates/generate", json={"wipeId": wipe["wipeId"]}, headers=h).json()
+            self.assertEqual(c.get(f"/api/certificates/{cert['certificateId']}/pdf", headers=h).status_code, 200)
+            self.assertEqual(c.get(f"/api/verify/{cert['certificateId']}").status_code, 200)
+            self.assertTrue(c.get("/api/audit/verify", headers=h).json()["valid"])
+            self.assertEqual(c.get("/api/devices", headers=h).status_code, 200)
+        finally:
+            socket.socket.connect, socket.getaddrinfo = real_connect, real_lookup
+        self.assertEqual(attempts, [], "WipeX tried to reach the network")
+
 class E01Images(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -264,8 +373,60 @@ class RecoveryOnRealVolumes(unittest.TestCase):
         clean = self.fsr.dir_traces(self.img, "/Evidence", ["Never_Existed.jpg"], {"0" * 64})
         self.assertEqual((clean["namesFound"], clean["contentFound"]), ([], []))
 
+    def test_files_inside_a_deleted_folder_are_recovered_by_name(self):
+        with open(self.img, "rb") as src:
+            data = bytearray(src.read())
+        i = data.find(b"EVIDENCE   ")                  # the folder's 8.3 entry in the root directory
+        self.assertGreater(i, 0)
+        data[i] = 0xE5                                     # what deleting the whole folder does to its entry,
+        j = i - 32
+        while j >= 0 and data[j + 11] == 0x0F:             # ...to its long-name entries
+            data[j] = 0xE5
+            j -= 32
+        bps, reserved, fats, fat_sectors = (struct.unpack_from("<H", data, 11)[0], struct.unpack_from("<H", data, 14)[0],
+                                            data[16], struct.unpack_from("<H", data, 22)[0])
+        cluster = struct.unpack_from("<H", data, i + 26)[0]
+        while 2 <= cluster < 0xFFF8:                       # ...and to its cluster chain in every FAT
+            nxt = struct.unpack_from("<H", data, reserved * bps + 2 * cluster)[0]
+            for k in range(fats):
+                struct.pack_into("<H", data, (reserved + k * fat_sectors) * bps + 2 * cluster, 0)
+            cluster = nxt
+        copy = os.path.join(_TMP, "deleted-folder.img")
+        with open(copy, "wb") as dst:
+            dst.write(data)
+        res = self.fsr.scan(copy, os.path.join(_TMP, "deleted-folder-out"))
+        photo = next(e for e in res["entries"] if e["name"] == "Site_Photo_02.jpg")   # deleted inside it earlier
+        self.assertEqual(photo["path"], "/Evidence/Site_Photo_02.jpg")
+        self.assertTrue(photo["deleted"])
+        self.assertEqual(photo["contentStatus"], "intact")
+        self.assertTrue(next(e for e in res["entries"] if e["name"] == "Site_Photo_01.jpg")["deleted"])
+
 
 class PlatformHelpers(unittest.TestCase):
+    def test_macos_and_linux_drive_lists(self):
+        """Recover Files lists USB volumes on macOS (diskutil) and Linux (lsblk) as well as Windows."""
+        import json as _json
+        import plistlib
+        from unittest import mock
+        import main
+        usb = plistlib.dumps({"DeviceNode": "/dev/disk4s1", "VolumeName": "KINGSTON", "FilesystemName": "MS-DOS (FAT32)",
+                              "TotalSize": 16_000_000_000, "FreeSpace": 9_000_000_000, "Internal": False,
+                              "BusProtocol": "USB", "SolidState": False})
+        run = mock.Mock(return_value=mock.Mock(stdout=usb))
+        with mock.patch.object(main.platform, "system", return_value="Darwin"),                 mock.patch("os.path.isdir", return_value=True), mock.patch("os.listdir", return_value=["KINGSTON", "Macintosh HD"]),                 mock.patch("os.path.ismount", return_value=True),                 mock.patch("os.path.realpath", side_effect=lambda p: "/" if p.endswith("Macintosh HD") else p),                 mock.patch("subprocess.run", run):
+            drives = main._unix_drives()
+        self.assertEqual([(d["id"], d["device"], d["removable"]) for d in drives], [("/dev/disk4s1", "/dev/rdisk4s1", True)])
+        lsblk = _json.dumps({"blockdevices": [
+            {"path": "/dev/nvme0n1", "type": "disk", "tran": "nvme", "hotplug": False, "rm": False, "children": [
+                {"path": "/dev/nvme0n1p2", "type": "part", "fstype": "ext4", "mountpoint": "/", "size": 500_000_000_000}]},
+            {"path": "/dev/sdb", "type": "disk", "tran": "usb", "hotplug": True, "rm": True, "rota": True, "children": [
+                {"path": "/dev/sdb1", "type": "part", "fstype": "exfat", "label": "STICK", "mountpoint": "/media/u/STICK",
+                 "size": 32_000_000_000}]}]}).encode()
+        with mock.patch.object(main.platform, "system", return_value="Linux"),                 mock.patch("subprocess.run", mock.Mock(return_value=mock.Mock(stdout=lsblk))):
+            drives = main._unix_drives()
+        self.assertEqual([(d["id"], d["fileSystem"], d["removable"], d["mediaType"]) for d in drives],
+                         [("/dev/sdb1", "EXFAT", True, "Flash")])
+
     def test_nvme_identify_parsing(self):
         data = bytearray(4096)
         data[4:24] = b"SERIAL123".ljust(20)

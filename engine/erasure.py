@@ -42,9 +42,10 @@ try:
 except ImportError:  # pragma: no cover
     HAS_AES = False
 
-CHUNK = 4 * 1024 * 1024
+CHUNK = 8 * 1024 * 1024                    # large sequential writes: what USB sticks handle best
 BLOCK = 4096
-FULL_VERIFY_LIMIT = 2 * 1024 ** 3         # read back everything up to 2 GiB
+FULL_VERIFY_LIMIT = 8 * 1024 ** 3         # read back every block up to 8 GiB; larger drives: sampled blocks
+VERIFY_SAMPLES = 4096                      # sampled read-back on larger drives (NIST SP 800-88 allows sampling)
 RECOVERY_VERIFY_LIMIT = 8 * 1024 ** 3     # run M3 recovery against targets up to 8 GiB
 CANARY_MAGIC = b"WIPEX-CANARY-v1:"
 
@@ -225,11 +226,16 @@ def _disk_letters(num: str) -> List[str]:
     return [x.strip() for x in res.stdout.strip().split(",") if x.strip()]
 
 
+FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME = 0x00090018, 0x00090020
+
+
 def _lock_volumes(path: str, num: str) -> None:
     """
     USB sticks and memory cards often cannot be taken offline. Instead, lock and dismount every
     volume on the disk (FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME) and hold the handles until the
     erasure is finished, which is how raw-disk tools write to removable drives on Windows.
+    When Explorer, an antivirus scan or the search indexer holds the drive open, the lock fails:
+    WipeX then forces a dismount, which invalidates those handles, and locks again.
     """
     import ctypes
     from ctypes import wintypes
@@ -237,18 +243,63 @@ def _lock_volumes(path: str, num: str) -> None:
     k32.CreateFileW.restype = wintypes.HANDLE
     invalid = wintypes.HANDLE(-1).value
     handles = []
+
+    def release():
+        for other in handles:
+            k32.CloseHandle(other)
+
     for letter in _disk_letters(num):
         h = k32.CreateFileW(f"\\\\.\\{letter}:", 0x80000000 | 0x40000000, 0x1 | 0x2, None, 3, 0, None)
+        if h in (None, invalid):
+            release()
+            raise PermissionError(f"Drive {letter}: cannot be opened for writing. Start WipeX as Administrator (WipeX.cmd).")
         got = wintypes.DWORD(0)
-        if h in (None, invalid) or not k32.DeviceIoControl(h, 0x00090018, None, 0, None, 0, ctypes.byref(got), None):
-            if h not in (None, invalid):
-                k32.CloseHandle(h)
-            for other in handles:
-                k32.CloseHandle(other)
-            raise PermissionError(f"Drive {letter}: is in use. Close any window or program using it and try again.")
-        k32.DeviceIoControl(h, 0x00090020, None, 0, None, 0, ctypes.byref(got), None)
+        ioctl = lambda code: bool(k32.DeviceIoControl(h, code, None, 0, None, 0, ctypes.byref(got), None))  # noqa: E731
+        locked = ioctl(FSCTL_LOCK_VOLUME)
+        if not locked:
+            ioctl(FSCTL_DISMOUNT_VOLUME)             # forced: other programs' handles on the volume become invalid
+            for _ in range(20):
+                time.sleep(0.25)
+                if ioctl(FSCTL_LOCK_VOLUME):
+                    locked = True
+                    break
+        if not locked:
+            k32.CloseHandle(h)
+            release()
+            raise PermissionError(f"Drive {letter}: is in use and could not be released. Close any window or "
+                                  "program showing it (Explorer, antivirus scan) and try again.")
+        ioctl(FSCTL_DISMOUNT_VOLUME)
         handles.append(h)
     _volume_locks[path] = handles
+
+
+_WIN_ERRORS = {
+    5: "Access denied: start WipeX as Administrator (WipeX.cmd).",
+    19: "The drive is write-protected. Slide the lock switch on the card or stick to unlocked and try again.",
+    21: "The drive is not ready. It may have been unplugged.",
+    32: "The drive is in use by another program. Close any window showing it and try again.",
+    55: "The drive was disconnected during the erasure.",
+    433: "The drive was disconnected during the erasure.",
+    1117: "The drive reported an I/O error. It may be failing: erase it again, or destroy it.",
+    1167: "The drive was disconnected during the erasure.",
+}
+
+
+def friendly_error(exc: Exception) -> str:
+    """Plain-language reason for an OS error during erasure (the technical text stays in the log)."""
+    code = getattr(exc, "winerror", None)
+    if code in _WIN_ERRORS:
+        return _WIN_ERRORS[code]
+    errno_ = getattr(exc, "errno", None)
+    if errno_ in (1, 13):
+        return "Permission denied: run WipeX as Administrator / root (sudo)."
+    if errno_ in (6, 19):
+        return "The drive was disconnected during the erasure."
+    if errno_ == 30:
+        return "The drive is write-protected."
+    if errno_ == 16:
+        return "The drive is busy: unmount it (or close programs using it) and try again."
+    return str(exc)
 
 
 def _prepare_physical(dev: Dict[str, Any]) -> None:
@@ -346,7 +397,14 @@ def run(wipe_id: str) -> Dict[str, Any]:
     path = _io_path(dev)
     params = _job_params.pop(wipe_id, {})
 
+    last = {"t": 0.0, "pct": -1}
+
     def progress(pct: int, speed: str, msg: str, status: str = "IN_PROGRESS"):
+        # at most ~3 database writes a second: a large drive reports thousands of chunks
+        now = time.time()
+        if status == "IN_PROGRESS" and pct == last["pct"] and now - last["t"] < 0.3:
+            return
+        last.update(t=now, pct=pct)
         database.update_wipe_progress(wipe_id, pct, status, speed, msg)
 
     execution: Dict[str, Any] = {"method": mid, "methodName": method["name"], "category": method["category"],
@@ -386,11 +444,13 @@ def run(wipe_id: str) -> Dict[str, Any]:
 
             progress(90, "—", "Verifying")
             verification = verify(path, capacity, final_pattern, key, offsets, before, canaries, bool(dev.get("isImage")),
-                                  lambda p, m: progress(90 + p * 9 // 100, "—", m))
+                                  lambda p, m: progress(90 + p * 9 // 100, "—", m),
+                                  seed=int.from_bytes(key[4:8], "big"))
             final_status = "COMPLETED" if verification["verdict"] == "PASS" else "VERIFICATION_FAILED"
     except Exception as exc:  # noqa: BLE001
-        execution["error"] = str(exc)
-        verification = verification or {"verdict": "FAIL", "summary": f"Erasure did not complete: {exc}"}
+        execution["error"] = friendly_error(exc)
+        execution["errorDetail"] = str(exc)
+        verification = verification or {"verdict": "FAIL", "summary": f"Erasure did not complete: {execution['error']}"}
         final_status = "FAILED"
     finally:
         if not dev.get("isImage") and not method.get("destroy"):
@@ -426,8 +486,10 @@ def _overwrite(path: str, capacity: int, passes: List[Any], key: bytes, progress
                 written_total += n
                 done = (i + offset / capacity) / len(passes)
                 elapsed = max(0.001, time.time() - t0)
-                progress(5 + int(done * 84), f"{written_total / elapsed / 1e6:.0f} MB/s",
-                         f"Pass {i + 1} of {len(passes)}")
+                rate = written_total / elapsed
+                left = (len(passes) * capacity - written_total) / max(rate, 1)
+                progress(5 + int(done * 84), f"{rate / 1e6:.0f} MB/s",
+                         f"Pass {i + 1} of {len(passes)} · {offset / 1e9:.1f} of {capacity / 1e9:.1f} GB · {_eta(left)}")
             f.flush()
             os.fsync(f.fileno())
             label = "random" if pattern == "random" else ("keyed random" if pattern == "prng" else "0x" + pattern.hex().upper())
@@ -436,6 +498,14 @@ def _overwrite(path: str, capacity: int, passes: List[Any], key: bytes, progress
     elapsed = max(0.001, time.time() - t0)
     execution["bytesWritten"] = written_total
     execution["throughput"] = f"{written_total / elapsed / 1e6:.0f} MB/s"
+
+
+def _eta(seconds: float) -> str:
+    if seconds < 60:
+        return "under a minute left"
+    if seconds < 3600:
+        return f"about {round(seconds / 60)} min left"
+    return f"about {seconds / 3600:.1f} h left"
 
 
 def _plant_canaries(f, capacity: int, n: int) -> List[Dict[str, Any]]:
@@ -453,10 +523,12 @@ def _plant_canaries(f, capacity: int, n: int) -> List[Dict[str, Any]]:
 
 
 def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: List[int], before: Dict[int, str],
-           canaries: List[Dict[str, Any]], is_image: bool, progress=None) -> Dict[str, Any]:
+           canaries: List[Dict[str, Any]], is_image: bool, progress=None, seed: int = 0) -> Dict[str, Any]:
     """Independent read-back verification. Returns verdict PASS / FAIL with evidence."""
     res: Dict[str, Any] = {"checks": []}
     full = final_pattern is not None and capacity <= FULL_VERIFY_LIMIT
+    if final_pattern is not None and not full:       # large drive: many more sampled blocks than the pre-erasure set
+        offsets = sorted(set(offsets) | set(_sample_offsets(capacity, VERIFY_SAMPLES, seed)))
     mismatches, unchanged, read_errors, entropies = 0, 0, 0, []
     first_mismatch = None
     with open(path, "rb", buffering=0) as f:
@@ -475,7 +547,7 @@ def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: Li
                     first_mismatch = first_mismatch if first_mismatch is not None else off
                 off += n
                 if progress:
-                    progress(int(off * 60 / capacity), "Full read-back")
+                    progress(int(off * 60 / capacity), f"Reading every block back: {off / 1e9:.1f} of {capacity / 1e9:.1f} GB")
             for o in offsets[:64]:
                 entropies.append(_entropy(_read(f, o, BLOCK)))
             coverage = "full"
@@ -516,35 +588,48 @@ def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: Li
             res["checks"].append({"name": "Canary blocks", "planted": len(canaries), "recovered": found,
                                   "passed": found == 0})
 
-    rav = recovery_as_verifier(path, capacity, progress)
+    pattern_ok = res["checks"][0]["passed"]
+    # When every block was read back and matched the erase pattern, carving provably finds nothing:
+    # the recovery attempt then only looks for a file system (seconds instead of another full read).
+    rav = recovery_as_verifier(path, capacity, progress, carve=not (full and pattern_ok))
     res["checks"].append(rav)
     res["meanEntropy"] = round(sum(entropies) / len(entropies), 4) if entropies else None
     res["samples"] = len(offsets)
     res["verdict"] = "PASS" if all(c.get("passed", True) for c in res["checks"]) else "FAIL"
     failed = [c["name"] for c in res["checks"] if c.get("passed") is False]
-    res["summary"] = ("Verified: pattern read-back matched, no canaries and no recoverable files."
-                      if res["verdict"] == "PASS" else "Verification failed: " + ", ".join(failed))
+    passed = ["pattern read-back matched" + (" on every block" if full else f" on {len(offsets)} sampled blocks")
+              if final_pattern is not None else "sampled blocks changed"]
+    if canaries:
+        passed.append("no canary left")
+    passed.append("nothing recoverable")
+    res["summary"] = ("Verified: " + ", ".join(passed) + "." if res["verdict"] == "PASS"
+                      else "Verification failed: " + ", ".join(failed))
     return res
 
 
-def recovery_as_verifier(path: str, capacity: int, progress=None) -> Dict[str, Any]:
-    """Run WipeX's own recovery engine against the erased target: erasure passes only if nothing is recoverable."""
-    if capacity > RECOVERY_VERIFY_LIMIT:
-        return {"name": "Recovery attempt (M3)", "skipped": True, "passed": None,
-                "reason": "Target larger than 8 GiB; recovery attempt skipped (pattern check still applies)"}
+def recovery_as_verifier(path: str, capacity: int, progress=None, carve: bool = True) -> Dict[str, Any]:
+    """Run WipeX's own recovery engine against the erased target: erasure passes only if nothing is recoverable.
+    The file-system search always runs (it reads only file-system structures); block carving runs on
+    targets up to 8 GiB unless the full read-back already proved every block holds the erase pattern."""
     import recovery
+    carve = carve and capacity <= RECOVERY_VERIFY_LIMIT
     out_dir = store.workspace_path("verify-tmp", secrets.token_hex(4))
     try:
-        scan = recovery.scan(path, out_dir, progress=(lambda p, m: progress(60 + p * 40 // 100, "Recovery attempt: " + m)) if progress else None)
+        scan = recovery.scan(path, out_dir, use_carving=carve,
+                             progress=(lambda p, m: progress(60 + p * 40 // 100, "Recovery attempt: " + m)) if progress else None)
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)
     fs = scan["filesystem"]
     fs_files = [e for e in fs.get("entries", []) if not e.get("isDir") and not str(e["name"]).startswith("$")]
     carved = scan["carving"].get("files", [])
+    clean = not fs_files and not carved
+    how = ("no file system and no carvable files" if carve else
+           "no file system; block carving not needed: every block matched the erase pattern"
+           if capacity <= FULL_VERIFY_LIMIT else "no file system; block carving skipped on drives over 8 GiB")
     return {"name": "Recovery attempt (M3)", "fileSystemsFound": len(fs.get("volumes", [])),
-            "fileSystemEntries": len(fs_files), "carvedFiles": len(carved),
-            "passed": not fs_files and not carved,
-            "detail": "No file system and no carvable files" if not fs_files and not carved
+            "fileSystemEntries": len(fs_files), "carvedFiles": len(carved), "carving": carve,
+            "passed": clean,
+            "detail": how[0].upper() + how[1:] if clean
             else f"{len(fs_files)} file-system entries and {len(carved)} carved files still recoverable"}
 
 
@@ -607,7 +692,9 @@ def format_for_reuse(wipe_id: str, fs: str, actor: str) -> Dict[str, Any]:
                 break
         where = part
     elif system == "Darwin":
-        res = subprocess.run(["diskutil", "eraseDisk", {"exFAT": "ExFAT", "FAT32": "MS-DOS FAT32", "NTFS": "ExFAT"}[fs],
+        if fs == "NTFS":
+            raise ValueError("macOS cannot create NTFS volumes; choose exFAT (works on Windows, macOS and Linux) or FAT32")
+        res = subprocess.run(["diskutil", "eraseDisk", {"exFAT": "ExFAT", "FAT32": "MS-DOS FAT32"}[fs],
                               label, "MBR", path], capture_output=True, text=True, timeout=600)
         where = path
     else:

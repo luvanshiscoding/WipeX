@@ -31,10 +31,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+import advisor
 import audit_log
 import benchmark
 import cases
 import database
+import demo
 import erasure
 import ewf
 import file_eraser
@@ -265,6 +267,7 @@ def health_check():
         "counts": {"auditEntries": audit_log.count(), "cases": len(cases.list_cases()),
                    "labImages": len(lab_images.list_images(with_files=False))},
         "dualApproval": cases.dual_approval_required(),
+        "demoMode": demo.enabled(),
         "setupRequired": users.setup_required(),
     }
 
@@ -302,6 +305,8 @@ def get_connected_devices(images: bool = True, refresh: bool = False, sess=Depen
     for d in devs:
         hold = cases.find_blocking_hold(d.get("serialNumber", ""), d.get("devicePath", ""))
         d["legalHold"] = {"id": hold["id"], "caseId": hold["case_id"]} if hold else None
+        d["advice"] = advisor.advise(d)                  # every method ranked for this device, with reasons
+        d["recommendedMethod"] = d["advice"]["recommended"]
     return devs
 
 
@@ -330,6 +335,7 @@ class WipeStartRequest(BaseModel):
 def start_wipe(req: WipeStartRequest, background_tasks: BackgroundTasks, sess=Depends(need("erasure.run"))):
     operator = sess["username"]
     try:
+        demo.check_device({"isImage": bool(lab_images.path_for_id(req.deviceId))})
         approval = _approval(operator, req.approver, req.approverPassword, f"erase-device:{req.methodId}", req.deviceId)
         started = erasure.start(req.deviceId, req.methodId, operator, (approval or {}).get("approver", ""),
                                 req.caseId, approval=approval, options={"psid": req.psid} if req.psid else None)
@@ -347,6 +353,7 @@ class ReuseRequest(BaseModel):
 def format_for_reuse(wipe_id: str, req: ReuseRequest, sess=Depends(need("erasure.run"))):
     """After a completed erasure: one partition and an empty file system so the drive can be used again."""
     try:
+        demo.check_device({})
         return erasure.format_for_reuse(wipe_id, req.fileSystem, sess["username"])
     except LookupError:
         raise HTTPException(404, "Wipe ID not found")
@@ -398,6 +405,7 @@ def verify_certificate(query: str):
     cert = erasure.lookup_certificate(query)
     if not cert:
         raise HTTPException(404, f"No certificate with ID or serial number '{query}'")
+    demo.mark("verify")
     return cert
 
 
@@ -450,6 +458,7 @@ class AndroidWipeRequest(BaseModel):
 def start_android_wipe(req: AndroidWipeRequest, sess=Depends(need("erasure.run"))):
     operator = sess["username"]
     try:
+        demo.check_device({})
         approval = _approval(operator, req.approver, req.approverPassword, f"erase-android:{req.mode}", req.serial)
         hold = cases.find_blocking_hold(req.serial)
         if hold:
@@ -505,6 +514,17 @@ def reset_lab_image(image_id: str, sess=Depends(need("lab.manage"))):
     return img
 
 
+@app.post("/api/lab/images/{image_id}/format")
+def quick_format_lab_image(image_id: str, sess=Depends(need("lab.manage"))):
+    """Quick-format a sample disk, to show recovery from formatted media (files come back by carving)."""
+    try:
+        img = lab_images.quick_format(image_id)
+    except Exception as exc:  # noqa: BLE001
+        _fail(exc)
+    audit_log.append("lab_image.formatted", sess["username"], target=img["devicePath"])
+    return img
+
+
 @app.delete("/api/lab/images/{image_id}")
 def delete_lab_image(image_id: str, sess=Depends(need("lab.manage"))):
     try:
@@ -533,34 +553,107 @@ class RecoveryRequest(BaseModel):
     caseId: Optional[str] = None
 
 
-_DRIVES_PS = r"""
-$ErrorActionPreference = 'SilentlyContinue'
-@(Get-Volume | Where-Object { $_.DriveLetter } | ForEach-Object {
-  [pscustomobject]@{ Letter = [string]$_.DriveLetter; Label = $_.FileSystemLabel; Fs = [string]$_.FileSystemType;
-                     Size = $_.Size; Free = $_.SizeRemaining; Type = [string]$_.DriveType } }) | ConvertTo-Json -Compress
-"""
+def _win_volumes() -> List[Dict[str, Any]]:
+    """Mounted Windows volumes with a letter, read through the Win32 API (fast: no PowerShell)."""
+    k32 = ctypes.windll.kernel32
+    vols = []
+    for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        root = f"{d}:\\"
+        kind = k32.GetDriveTypeW(root)                     # 2 removable, 3 fixed, 4 network, 5 CD-ROM
+        if kind not in (2, 3):
+            continue
+        label, fs = ctypes.create_unicode_buffer(261), ctypes.create_unicode_buffer(261)
+        if not k32.GetVolumeInformationW(root, label, 261, None, None, None, fs, 261):
+            continue                                       # empty card reader or unreadable volume
+        free, total = ctypes.c_ulonglong(0), ctypes.c_ulonglong(0)
+        k32.GetDiskFreeSpaceExW(root, None, ctypes.byref(total), ctypes.byref(free))
+        vols.append({"letter": d, "root": root, "label": label.value, "fs": fs.value or "Unknown",
+                     "size": total.value, "free": free.value, "removableType": kind == 2})
+    return vols
 
 
 def _windows_drives() -> List[Dict[str, Any]]:
+    system = os.environ.get("SystemDrive", "C:")[0].upper()
+    ws_drive = os.path.splitdrive(os.path.abspath(store.WORKSPACE))[0].upper()
+    drives = []
+    for v in _win_volumes():
+        if not v["size"]:
+            continue
+        media = file_eraser._media_info(v["root"])
+        letter = v["letter"]
+        drives.append({"id": letter, "letter": letter, "label": v["label"], "fileSystem": v["fs"],
+                       "size": v["size"], "free": v["free"],
+                       "removable": v["removableType"] or media.get("busType") in ("USB", "SD", "MMC"),
+                       "mediaType": media.get("mediaType"), "trim": media.get("trim"), "isSystem": letter == system,
+                       "sameAsWorkspace": ws_drive == f"{letter}:"})
+    return drives
+
+
+def _macos_volume(mount: str) -> Optional[Dict[str, Any]]:
+    """diskutil's view of one mounted macOS volume."""
+    import plistlib
     import subprocess
     try:
-        out = subprocess.run(["powershell", "-NoProfile", "-Command", _DRIVES_PS], capture_output=True, timeout=30)
-        data = json.loads(out.stdout.decode("utf-8", "ignore") or "[]")
+        out = subprocess.run(["diskutil", "info", "-plist", mount], capture_output=True, timeout=15).stdout
+        info = plistlib.loads(out) if out else {}
     except (OSError, ValueError, subprocess.SubprocessError):
-        return []
-    data = [data] if isinstance(data, dict) else data
-    system = os.environ.get("SystemDrive", "C:")[0].upper()
-    drives = []
-    for v in data:
-        letter = (v.get("Letter") or "").upper()
-        if not letter or not v.get("Size") or v.get("Type") == "CD-ROM":
-            continue
-        media = file_eraser._media_info(f"{letter}:\\")
-        drives.append({"id": letter, "letter": letter, "label": v.get("Label") or "", "fileSystem": v.get("Fs") or "Unknown",
-                       "size": int(v.get("Size") or 0), "free": int(v.get("Free") or 0),
-                       "removable": v.get("Type") == "Removable" or media.get("busType") in ("USB", "SD", "MMC"),
-                       "mediaType": media.get("mediaType"), "trim": media.get("trim"), "isSystem": letter == system,
-                       "sameAsWorkspace": os.path.splitdrive(os.path.abspath(store.WORKSPACE))[0].upper() == f"{letter}:"})
+        return None
+    node = info.get("DeviceNode") or ""
+    if not node.startswith("/dev/disk"):
+        return None
+    external = not info.get("Internal", True) or bool(info.get("RemovableMedia") or info.get("Removable"))
+    bus = str(info.get("BusProtocol") or "")
+    return {"id": node, "device": "/dev/r" + node[len("/dev/"):], "mount": mount, "label": info.get("VolumeName") or "",
+            "fileSystem": info.get("FilesystemName") or info.get("FilesystemType") or "Unknown",
+            "size": int(info.get("TotalSize") or info.get("Size") or 0),
+            "free": int(info.get("FreeSpace") or info.get("APFSContainerFree") or 0),
+            "removable": external or bus in ("USB", "Secure Digital"),
+            "mediaType": "SSD" if info.get("SolidState") else "Flash" if bus in ("USB", "Secure Digital") else "Unknown"}
+
+
+def _unix_drives() -> List[Dict[str, Any]]:
+    """Mounted and unmounted data volumes on macOS / Linux that The Sleuth Kit can read (not the system disk)."""
+    import subprocess
+    ws = os.path.abspath(store.WORKSPACE)
+    drives: List[Dict[str, Any]] = []
+    if platform.system() == "Darwin":
+        for name in sorted(os.listdir("/Volumes")) if os.path.isdir("/Volumes") else []:
+            mount = os.path.join("/Volumes", name)
+            if os.path.realpath(mount) == "/" or not os.path.ismount(mount):
+                continue
+            v = _macos_volume(mount)
+            if v and v["fileSystem"].upper() not in ("APFS",):          # APFS cannot be read by The Sleuth Kit
+                drives.append(v)
+    else:
+        try:
+            out = subprocess.run(["lsblk", "-J", "-b", "-o", "PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT,HOTPLUG,RM,TYPE,TRAN,ROTA"],
+                                 capture_output=True, timeout=15).stdout
+            data = json.loads(out or b"{}").get("blockdevices", [])
+        except (OSError, ValueError, subprocess.SubprocessError):
+            data = []
+
+        def flat(nodes, parent=None):
+            for n in nodes:
+                yield n, parent
+                yield from flat(n.get("children") or [], n)
+
+        for n, parent in flat(data):
+            mount = n.get("mountpoint") or ""
+            fstype = (n.get("fstype") or "").lower()
+            if n.get("type") not in ("part", "disk") or not fstype or fstype in ("swap", "linux_raid_member", "lvm2_member",
+                                                                                 "crypto_luks", "btrfs", "zfs_member"):
+                continue
+            if mount in ("/", "/boot", "/boot/efi", "/usr", "/var", "/home") or mount.startswith("/snap"):
+                continue
+            hot = bool(n.get("hotplug") or n.get("rm") or (parent or {}).get("hotplug") or (parent or {}).get("rm"))
+            tran = str(n.get("tran") or (parent or {}).get("tran") or "")
+            drives.append({"id": n["path"], "device": n["path"], "mount": mount, "label": n.get("label") or "",
+                           "fileSystem": fstype.upper(), "size": int(n.get("size") or 0), "free": 0,
+                           "removable": hot or tran in ("usb", "mmc"),
+                           "mediaType": "Flash" if tran in ("usb", "mmc") else "HDD" if n.get("rota") else "SSD"})
+    for d in drives:
+        d.update(letter=None, trim=None, isSystem=False,
+                 sameAsWorkspace=bool(d["mount"]) and (ws == d["mount"] or ws.startswith(d["mount"].rstrip("/") + "/")))
     return drives
 
 
@@ -568,7 +661,7 @@ def _windows_drives() -> List[Dict[str, Any]]:
 def recovery_sources(sess=Depends(need("recovery.run"))):
     """Drives (Windows volumes), lab images and acquired evidence that can be scanned."""
     evidence = [e for c in cases.list_cases() for e in (cases.get_case(c["id"]) or {}).get("evidence", [])]
-    return {"drives": _windows_drives() if platform.system() == "Windows" else [],
+    return {"drives": _windows_drives() if platform.system() == "Windows" else _unix_drives(),
             "labImages": lab_images.list_images(with_files=False),
             "evidence": [{"id": e["id"], "label": e["label"], "caseId": e["case_id"], "size": e["size_bytes"],
                           "format": "E01" if "E01" in (e.get("kind") or "") else "raw"} for e in evidence],
@@ -576,12 +669,26 @@ def recovery_sources(sess=Depends(need("recovery.run"))):
 
 
 def _resolve_source(src: RecoverySource) -> Dict[str, Any]:
+    if src.type == "drive" and platform.system() != "Windows":
+        drive = next((d for d in _unix_drives() if d["id"] == src.id), None)
+        if not drive:
+            raise LookupError("Drive not found: plug it in and reopen Recover Files")
+        if not _is_admin():
+            raise PermissionError("Reading a drive directly needs root: start WipeX with sudo")
+        folder = ""
+        if src.folder:
+            if not drive["mount"]:
+                raise ValueError("This drive is not mounted, so it can only be scanned as a whole")
+            ap = os.path.realpath(src.folder)
+            if not (ap == drive["mount"] or ap.startswith(drive["mount"].rstrip("/") + "/")):
+                raise ValueError(f"The folder must be on {drive['label'] or drive['id']}")
+            folder = ap[len(drive["mount"].rstrip("/")):] or "/"
+        return {"path": drive["device"], "label": (drive["label"] or drive["id"]) + (f" (folder {src.folder})" if folder else ""),
+                "folder": folder}
     if src.type == "drive":
         letter = (src.id or "").strip().rstrip(":\\").upper()
         if len(letter) != 1 or not letter.isalpha():
             raise ValueError("Choose a drive letter")
-        if platform.system() != "Windows":
-            raise ValueError("Scanning drives by letter is available on Windows")
         if not _is_admin():
             raise PermissionError("Reading a drive directly needs Administrator rights: start WipeX as Administrator")
         folder = ""
@@ -737,9 +844,16 @@ def list_directory(path: str = "", sess=Depends(signed_in)):
     """Read-only directory listing for the file picker."""
     if not path:
         if platform.system() == "Windows":
-            drives = [f"{d}:\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{d}:\\")]
-            return {"path": "", "parent": None, "entries": [{"name": d, "path": d, "isDir": True} for d in drives]}
-        path = "/"
+            return {"path": "", "parent": None, "entries": _drive_roots(), "places": _places(),
+                    "workspace": os.path.abspath(store.WORKSPACE)}
+        roots = [{"name": f"{d['mount']}  {d['label'] or 'USB drive'}  ({d['fileSystem']})", "path": d["mount"],
+                  "isDir": True, "removable": True, "label": d["label"] or "USB drive", "drive": d["mount"],
+                  "fileSystem": d["fileSystem"], "size": d.get("size") or 0, "free": d.get("free") or 0}
+                 for d in _unix_drives() if d["removable"] and d["mount"]]
+        roots += [{"name": f"{p}  (home folder)" if p == os.path.expanduser("~") else p, "path": p, "isDir": True,
+                   "protected": True} for p in (os.path.expanduser("~"), "/") if os.path.isdir(p)]
+        return {"path": "", "parent": None, "entries": roots, "places": _places(),
+                "workspace": os.path.abspath(store.WORKSPACE)}
     ap = os.path.abspath(path)
     if not os.path.isdir(ap):
         raise HTTPException(404, "Not a directory")
@@ -748,9 +862,12 @@ def list_directory(path: str = "", sess=Depends(signed_in)):
         for name in sorted(os.listdir(ap), key=str.lower)[:2000]:
             fp = os.path.join(ap, name)
             try:
+                st = os.stat(fp)
                 is_dir = os.path.isdir(fp)
                 entries.append({"name": name, "path": fp, "isDir": is_dir,
-                                "size": 0 if is_dir else os.path.getsize(fp),
+                                "size": 0 if is_dir else st.st_size,
+                                "modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)),
+                                "hidden": name.startswith(".") or name.lower() in ("desktop.ini", "thumbs.db"),
                                 "protected": bool(file_eraser.check_path_allowed(fp))})
             except OSError:
                 continue
@@ -761,10 +878,37 @@ def list_directory(path: str = "", sess=Depends(signed_in)):
             "workspace": os.path.abspath(store.WORKSPACE)}
 
 
+def _places() -> List[Dict[str, Any]]:
+    """The user's standard folders, for the file browser's side panel (like Explorer and Finder)."""
+    home = os.path.expanduser("~")
+    out = []
+    for name in ("Desktop", "Documents", "Downloads", "Pictures"):
+        p = os.path.join(home, name)
+        if os.path.isdir(p):
+            out.append({"name": name, "path": p, "isDir": True})
+    return out
+
+
+def _drive_roots() -> List[Dict[str, Any]]:
+    """Drive letters for the picker; USB sticks and memory cards first, with their labels."""
+    roots = []
+    for v in _win_volumes():
+        removable = v["removableType"] or file_eraser._media_info(v["root"]).get("busType") in ("USB", "SD", "MMC")
+        name = f"{v['root']}  {v['label'] or ('USB drive' if removable else 'Local disk')}  ({v['fs']})"
+        roots.append({"name": name, "path": v["root"], "isDir": True, "removable": removable,
+                      "protected": not removable,               # only a USB drive's root can be wiped as a whole
+                      "label": v["label"] or ("USB drive" if removable else "Local disk"), "drive": f"{v['letter']}:",
+                      "fileSystem": v["fs"], "size": v["size"], "free": v["free"]})
+    return sorted(roots, key=lambda r: not r["removable"])
+
+
 @app.post("/api/files/analyze")
 def analyze_files(req: PathsRequest, sess=Depends(need("files.erase"))):
     try:
-        return file_eraser.analyze(req.paths)
+        result = file_eraser.analyze(req.paths)
+        result["pattern"] = advisor.advise_file_pattern(result["volumes"])
+        result["demoMode"] = demo.enabled()
+        return result
     except Exception as exc:  # noqa: BLE001
         _fail(exc)
 
@@ -773,6 +917,7 @@ def analyze_files(req: PathsRequest, sess=Depends(need("files.erase"))):
 def erase_files(req: FileEraseRequest, sess=Depends(need("files.erase"))):
     operator = sess["username"]
     try:
+        demo.check_paths(req.paths)
         approval = _approval(operator, req.approver, req.approverPassword, f"erase-files:{req.method}",
                              ";".join(req.paths)[:500])
         cases.check_authorization(operator, (approval or {}).get("approver", ""))
@@ -790,6 +935,20 @@ def erase_files(req: FileEraseRequest, sess=Depends(need("files.erase"))):
 @app.post("/api/files/sandbox")
 def create_file_sandbox(sess=Depends(need("files.erase"))):
     return file_eraser.create_sandbox(True)
+
+
+@app.get("/api/files/sandbox")
+def list_file_sandboxes(sess=Depends(need("files.erase"))):
+    """Sample-file folders WipeX created (the only ones demo mode may delete), newest first."""
+    sets = []
+    for base in file_eraser.sandbox_roots():
+        if os.path.isdir(base):
+            for name in os.listdir(base):
+                p = os.path.join(base, name)
+                if os.path.isdir(p):
+                    sets.append({"name": name, "path": p, "isDir": True, "size": 0,
+                                 "modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(p)))})
+    return {"roots": file_eraser.sandbox_roots(), "sets": sorted(sets, key=lambda s: s["modified"], reverse=True)}
 
 
 @app.get("/api/files/report/{job_id}.pdf")
@@ -933,6 +1092,30 @@ def set_dual_approval(req: DualApprovalRequest, sess=Depends(need("settings.mana
     return {"enabled": req.enabled}
 
 
+# ── Demo mode: sample disks and sample files only, with a guided walkthrough ─
+
+@app.get("/api/demo")
+def get_demo(sess=Depends(signed_in)):
+    return demo.progress()
+
+
+@app.post("/api/demo")
+def set_demo(req: DualApprovalRequest, sess=Depends(signed_in)):
+    """Any profile may switch it: demo mode only narrows what can be erased."""
+    demo.set_enabled(req.enabled, sess["username"])
+    return demo.progress()
+
+
+@app.post("/api/demo/reset")
+def reset_demo(sess=Depends(signed_in)):
+    if not demo.enabled():
+        raise HTTPException(409, "Turn demo mode on first")
+    try:
+        return demo.reset(sess["username"])
+    except Exception as exc:  # noqa: BLE001
+        _fail(exc)
+
+
 # ── Audit log ────────────────────────────────────────────────────────────────
 
 @app.get("/api/audit/log")
@@ -942,8 +1125,11 @@ def get_audit_log(limit: int = Query(200, le=2000), offset: int = 0, caseId: Opt
 
 
 @app.get("/api/audit/verify")
-def verify_audit_chain(sess=Depends(need("audit.read"))):
-    return audit_log.verify_chain()
+def verify_audit_chain(step: bool = False, sess=Depends(need("audit.read"))):
+    result = audit_log.verify_chain()
+    if step and result.get("valid"):                 # opened from the Audit Log page: a demo walkthrough step
+        demo.mark("audit")
+    return result
 
 
 @app.get("/api/audit/export")
@@ -974,6 +1160,10 @@ def index():
         return FileResponse(page, headers={"Cache-Control": "no-cache"})
     return JSONResponse({"service": "WipeX", "status": "ONLINE",
                          "ui": "UI not built: run `npm run build`, or use `npm run dev` on port 5173"})
+
+
+if platform.system() == "Windows":           # warm the drive details so the first Recover Files visit is quick
+    threading.Thread(target=_windows_drives, daemon=True).start()
 
 
 if __name__ == "__main__":

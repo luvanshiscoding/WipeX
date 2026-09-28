@@ -72,6 +72,30 @@ class LabImageAndRecovery(unittest.TestCase):
         exts = {f["ext"] for f in self.result["carving"]["files"]}
         self.assertIn("docx", exts)
 
+    def test_every_recovered_file_has_a_confidence_score(self):
+        deleted = [e for e in self.result["filesystem"]["entries"] if e["deleted"] and e.get("size")]
+        self.assertTrue(deleted and all(0 <= e["confidence"] <= 1 for e in deleted))
+        by_path = {e["path"]: e for e in deleted}
+        self.assertGreater(by_path["/Evidence/Site_Photo_02.jpg"]["confidence"],
+                           by_path["/Evidence/Network_Diagram.png"]["confidence"])     # intact above damaged
+        self.assertTrue(all(0 < f["confidence"] <= 1 for f in self.result["carving"]["files"]))
+
+    def test_recovery_after_quick_format(self):
+        """A quick format empties the file system; carving still brings the files back, byte-exact."""
+        img = lab_images.create_image("formatted-test")
+        try:
+            path = img["devicePath"]
+            truth = lab_images.truth_for(path)
+            lab_images.quick_format(img["id"])
+            res = recovery.scan(path, os.path.join(_TMP, "fmt-out"))
+            self.assertFalse([e for e in res["filesystem"]["entries"] if not e.get("isDir") and not e["name"].startswith("$")],
+                             "the file system should list nothing after a format")
+            carved = {f["sha256"] for f in res["carving"]["files"]}
+            photos = [f for f in truth["files"] if f["ext"] in ("jpg", "png", "pdf")]
+            self.assertTrue(all(f["sha256"] in carved for f in photos))
+        finally:
+            lab_images.delete_image(img["id"])
+
 
 class FormatValidators(unittest.TestCase):
     def test_png_crc_corruption_rejected(self):
@@ -284,6 +308,36 @@ class FileEraser(unittest.TestCase):
         self.assertFalse(os.path.exists(sb["path"]))
         if os.name == "nt":
             self.assertGreaterEqual(report["streamsErased"], 1)
+
+
+    def test_links_are_removed_not_followed(self):
+        """A junction or symlink inside an erased folder goes as a link; what it points to is untouched."""
+        sb = file_eraser.create_sandbox(with_trace_demo=False)
+        outside = tempfile.mkdtemp(prefix="wipex-outside-")
+        keep = os.path.join(outside, "keep.txt")
+        with open(keep, "w", encoding="utf-8") as f:
+            f.write("must survive")
+        dir_link = os.path.join(sb["path"], "link-to-outside")
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(outside, dir_link)
+        else:
+            os.symlink(outside, dir_link)
+        links = 1
+        try:
+            os.symlink(keep, os.path.join(sb["path"], "keep-shortcut.txt"))
+            links += 1
+        except (OSError, NotImplementedError):
+            pass                                           # Windows without the symlink privilege
+        self.assertTrue(file_eraser._is_link(dir_link))
+        report = file_eraser.erase([sb["path"]], "zero", False, "Tester")
+        self.assertFalse(os.path.exists(sb["path"]))
+        with open(keep, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "must survive")
+        self.assertEqual(report["linksRemoved"], links)
+        # A link that points into a protected place is judged by its target
+        users = os.path.join(os.path.abspath(os.sep), "Users" if os.name == "nt" else "home")
+        self.assertIsNotNone(file_eraser.check_path_allowed(os.path.join(users, "someone-else")))
 
 
 class Benchmark(unittest.TestCase):

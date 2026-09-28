@@ -5,40 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WipeX — Secure Erasure & Forensic Recovery</title>
   <meta name="description" content="WipeX: integrated secure data erasure and forensic file recovery workstation.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230e7470'/%3E%3Cpath d='M6 8h12M6 12h8M6 16h5' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="img/wipex-logo.svg">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="#/overview" aria-label="WipeX home">
-        <span class="brand-mark">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M5 7h14M5 12h9M5 17h5"/></svg>
-        </span>
-        <span class="brand-name">WipeX</span>
-        
-      </a>
-      <nav class="nav" id="nav" aria-label="Main"></nav>
-      <div class="top-right">
-        <span class="engine" id="engine-status" title="Backend engine status"><span class="dot"></span><span class="engine-text">Connecting…</span></span>
-        <span class="access-tag" title="Restricted workstation tool: the engine accepts requests from this computer only, and every action is signed and logged">NTRO · controlled access</span>
-        <button class="operator-chip" id="operator-chip" title="Switch the access profile">
-          <span class="avatar" id="operator-avatar">·</span><span class="operator-name" id="operator-name">Opening…</span>
-        </button>
-      </div>
+  <aside class="sidebar" id="sidebar" aria-label="Main">
+    <a class="brand" href="#/overview" aria-label="WipeX home">
+      <img class="brand-logo" src="img/wipex-logo.svg" alt="" width="34" height="34">
+      <span class="brand-text"><span class="brand-name">WipeX</span><span class="brand-tag">Erase · Verify · Recover</span></span>
+    </a>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <span class="engine" id="engine-status" title="Backend engine status"><span class="dot"></span><span class="engine-text">Connecting…</span></span>
     </div>
-  </header>
+  </aside>
+  <div class="scrim" id="scrim"></div>
 
-  <main class="page" id="page">
-    <section class="view" id="view-overview"></section>
-    <section class="view" id="view-drive"></section>
-    <section class="view" id="view-files"></section>
-    <section class="view" id="view-recovery"></section>
-    <section class="view" id="view-cases"></section>
-    <section class="view" id="view-audit"></section>
-    <section class="view" id="view-verify"></section>
-    <section class="view" id="view-settings"></section>
-  </main>
+  <div class="shell">
+    <header class="topbar">
+      <button class="menu-btn" id="menu-btn" aria-label="Open the menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="crumb" id="crumb"></div>
+      <label class="demo-switch" id="demo-switch" title="Demo mode: practise the whole flow on sample disks and sample files; real drives cannot be erased">
+        <input type="checkbox" id="demo-toggle" role="switch"><span class="switch-track"><span class="switch-knob"></span></span><span>Demo mode</span>
+      </label>
+      <button class="operator-chip" id="operator-chip" title="Switch the access profile">
+        <span class="avatar" id="operator-avatar">·</span><span class="operator-name" id="operator-name">Opening…</span>
+      </button>
+    </header>
+    <div class="demo-bar" id="demo-bar" hidden></div>
+
+    <main class="page" id="page">
+      <section class="view" id="view-overview"></section>
+      <section class="view" id="view-erase"></section>
+      <section class="view" id="view-recovery"></section>
+      <section class="view" id="view-cases"></section>
+      <section class="view" id="view-audit"></section>
+      <section class="view" id="view-verify"></section>
+      <section class="view" id="view-settings"></section>
+    </main>
+  </div>
 
   <div id="auth-root"></div>
 

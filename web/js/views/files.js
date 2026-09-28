@@ -1,9 +1,12 @@
-/** Permanently delete files and folders, remove the traces Windows keeps, then prove nothing is left. */
-import { api, apiUrl, badge, bytes, confirmDanger, esc, getOperator, icon, pickPaths, progressBlock,
-  reportError, toast, waitForJob } from '../core.js';
+/** Erase selected files and folders: pick them in a file browser, remove the traces the system keeps, prove nothing is left. */
+import { api, apiUrl, badge, bytes, confirmDanger, demo, esc, getOperator, icon, progressBlock,
+  refreshDemo, reportError, toast, waitForJob } from '../core.js';
+import { mountExplorer } from '../explorer.js';
 
-const S = { paths: [], analysis: null, analyzing: false, method: 'dod', clean: true, journal: true, job: null };
-let root, appRef;
+const S = { selected: new Map(), analysis: null, analyzing: false, method: 'random', methodChosen: false, clean: true, journal: true, job: null, demo: null };
+let root, appRef, xp = null;
+const visible = () => root?.isConnected && root.closest('.view')?.classList.contains('active');
+const paths = () => [...S.selected.keys()];
 
 const METHODS = [
   { id: 'dod', label: '3 passes (zeros, ones, random)' },
@@ -13,13 +16,14 @@ const METHODS = [
 
 const ASSURANCE = {
   High: ['ok', 'check', 'Overwritten data cannot be read back from this drive.'],
-  Limited: ['warn', 'info', 'This is an SSD or flash drive. WipeX overwrites the file and removes every trace it can reach, but the drive may keep old copies in hidden spare blocks. For absolute certainty, erase the whole drive.'],
-  'Not effective': ['bad', 'alert', 'This file system writes changes to new places (copy-on-write), so overwriting cannot reach the old data. Erase the whole drive instead.'],
+  Limited: ['warn', 'info', 'Flash or SSD: WipeX removes everything it can reach, but hidden spare blocks may keep old copies. For certainty, erase the whole drive.'],
+  'Not effective': ['bad', 'alert', 'Copy-on-write file system: overwriting cannot reach the old data. Erase the whole drive instead.'],
 };
 
 export async function show(el, _params, app) {
-  root = el;
   appRef = app;
+  if (root !== el) xp = null;
+  root = el;
   render();
 }
 
@@ -27,35 +31,65 @@ const fileCount = (a) => a.items.reduce((n, i) => n + (i.fileCount || 0), 0);
 const totalBytes = (a) => a.items.reduce((n, i) => n + (i.bytes || 0), 0);
 
 function render() {
+  if (S.demo !== demo.enabled) {             // switching demo mode starts a fresh selection
+    if (S.demo !== null) { S.selected.clear(); S.analysis = null; }
+    S.demo = demo.enabled;
+    xp = null;
+  }
+  if (!xp || !root.querySelector('#fe-xp')) {
+    root.innerHTML = `
+      <div class="card xp-card">
+        <div class="card-head"><div><div class="card-title">1 · ${demo.enabled ? 'Choose sample files' : 'Choose files and folders'}</div>
+          <div class="card-sub">${demo.enabled ? 'Demo mode: only the sample files WipeX created are shown' : 'Tick what to erase · double-click a folder to open it · USB drives first'}</div></div></div>
+        <div id="fe-xp"></div>
+      </div>
+      <div id="fe-tray"></div>
+      <div id="fe-rest"></div>`;
+    const host = root.querySelector('#fe-xp');
+    host.addEventListener('click', e => { if (e.target.closest('#fe-sandbox')) createSandbox(); });
+    xp = mountExplorer(host, {
+      demo: demo.enabled, selected: S.selected,
+      onChange: () => { S.analysis = null; renderTray(); renderRest(); },
+      actions: demo.enabled ? `<button class="btn btn-primary btn-sm" id="fe-sandbox">${icon('plus', 14)} Create sample files</button>` : '',
+    });
+  }
+  renderTray();
+  renderRest();
+}
+
+function renderTray() {
+  const el = root.querySelector('#fe-tray');
+  if (!el) return;
+  const items = [...S.selected.values()];
+  if (!items.length) { el.innerHTML = ''; return; }
+  const running = S.job?.status === 'RUNNING';
+  el.innerHTML = `
+    <div class="sel-tray">
+      <div class="sel-chips">${items.map(e => `<span class="sel-chip" title="${esc(e.path)}">${icon(e.isDir ? 'folder' : 'file', 14)}<span>${esc(e.drive ? `${e.label} (${e.drive})` : e.name)}</span>
+        <button data-unsel="${esc(e.path)}" title="Remove from the selection" aria-label="Remove">${icon('x', 12)}</button></span>`).join('')}</div>
+      <div class="sel-actions">
+        <span class="muted small">${items.length} selected</span>
+        <button class="btn btn-ghost btn-sm" id="fe-clear">Clear</button>
+        ${S.analysis ? '' : `<button class="btn btn-primary" id="fe-check" ${S.analyzing || running ? 'disabled' : ''}>Review selection ${icon('arrow', 15)}</button>`}
+      </div>
+    </div>`;
+  el.querySelectorAll('[data-unsel]').forEach(b => b.addEventListener('click', () => {
+    S.selected.delete(b.dataset.unsel); S.analysis = null; xp?.render(); renderTray(); renderRest();
+  }));
+  el.querySelector('#fe-clear').addEventListener('click', () => { S.selected.clear(); S.analysis = null; xp?.render(); renderTray(); renderRest(); });
+  el.querySelector('#fe-check')?.addEventListener('click', analyze);
+}
+
+function renderRest() {
+  const el = root.querySelector('#fe-rest');
+  if (!el) return;
   const a = S.analysis;
   const running = S.job?.status === 'RUNNING';
-  root.innerHTML = `
-    <div class="page-head">
-      <div>
-        <h1 class="page-title">Permanently delete files</h1>
-        <p class="page-desc">Destroy chosen files and folders so they cannot be recovered or traced: their content, their names and the records the operating system keeps about them. Afterwards WipeX checks the drive to prove nothing is left.</p>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-head">
-        <span class="card-title">1 · Choose files or folders</span>
-        <div class="row">
-          <button class="btn btn-secondary btn-sm" id="fe-sandbox" title="Create disposable sample files to try this safely">${icon('plus', 14)} Create sample files</button>
-          <button class="btn btn-primary btn-sm" id="fe-add">${icon('folder', 14)} Add files or folders</button>
-        </div>
-      </div>
-      <div class="card-body">
-        ${S.paths.length ? `<div class="path-list">${S.paths.map((p, i) => `
-          <div class="path-item">${icon('file', 15)}<span class="p" title="${esc(p)}">${esc(p)}</span>
-          <button class="btn btn-ghost btn-sm" data-rm="${i}" title="Remove from the list">${icon('x', 14)}</button></div>`).join('')}</div>`
-        : '<div class="empty">Nothing selected yet. Add files or folders, or create sample files to try it safely.</div>'}
-        <input class="input mono" id="fe-path" placeholder="…or paste a full path and press Enter" style="margin-top:12px">
-      </div>
-    </div>
+  el.innerHTML = `
     ${S.analyzing ? `<div class="card card-pad" style="margin-top:16px">${progressBlock(null, 'Checking the drive…')}</div>` : ''}
     ${a && !S.analyzing ? prepareCard(a, running) : ''}
     ${S.job ? jobCard() : ''}`;
-  bind();
+  bind(el);
 }
 
 function prepareCard(a, running) {
@@ -79,19 +113,21 @@ function prepareCard(a, running) {
         ${a.volumes.map(v => {
           const [tone, ic, text] = ASSURANCE[v.assurance] || ['warn', 'info', v.advice];
           return `<div class="notice ${tone}">${icon(ic, 18)}<div><strong>Drive ${esc(v.volume)} · ${esc(v.fileSystem)} · ${esc(v.mediaType)}</strong>${esc(text)}
-            ${v.assurance !== 'High' ? '<div style="margin-top:6px"><a href="#/drive">Erase a whole drive instead</a></div>' : ''}</div></div>`;
+            ${v.assurance !== 'High' ? '<div style="margin-top:6px"><a href="#/erase?mode=drive">Erase the whole drive instead</a></div>' : ''}</div></div>`;
         }).join('')}
+        ${a.items.filter(i => i.wholeDrive).map(i => `<div class="notice warn">${icon('usb', 18)}<div><strong>Everything on ${esc(i.path)} will be destroyed</strong>All ${i.fileCount} file(s) and every folder on this USB drive. The drive itself stays usable.</div></div>`).join('')}
         ${blocked.length ? `<div class="notice bad">${icon('lock', 16)}<div><strong>Cannot erase some items</strong>${blocked.map(i => `${esc(i.path)}: ${esc(i.blocked)}`).join('<br>')}</div></div>` : ''}
         ${missing.length ? `<div class="notice warn">${icon('alert', 16)}<div><strong>Not found</strong>${missing.map(i => esc(i.path)).join('<br>')}</div></div>` : ''}
+        ${patternLine(a)}
         <label class="check"><input type="checkbox" id="fe-clean" ${S.clean ? 'checked' : ''}>
-          <span>Remove the traces Windows keeps<span class="hint">Recent-files shortcuts and Jump Lists that point to these files${traceRows.length ? ` (${traceRows.length} found)` : ''}.</span></span></label>
+          <span>Remove the traces the system keeps<span class="hint">${appRef.health?.platform === 'Darwin' ? 'Recent items, Finder metadata and download records' : appRef.health?.platform === 'Linux' ? 'Recently used lists and thumbnails' : 'Recent-files shortcuts and Jump Lists'}${traceRows.length ? ` (${traceRows.length} found)` : ''}</span></span></label>
         ${journal ? `<label class="check"><input type="checkbox" id="fe-journal" ${S.journal ? 'checked' : ''}>
-          <span>Clear the drive's change journal<span class="hint">NTFS keeps a log of file names, including deleted ones. WipeX empties it and starts a fresh one.</span></span></label>` : ''}
+          <span>Clear the drive's change journal<span class="hint">NTFS logs file names, including deleted ones</span></span></label>` : ''}
       </div>
       <details class="more"><summary>Advanced options and details</summary><div class="more-body stack">
         <div class="field"><label for="fe-method">Overwrite pattern</label>
-          <select class="select" id="fe-method">${METHODS.map(m => `<option value="${m.id}" ${S.method === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
-          <span class="hint">One pass is enough on modern drives; three passes follow the older DoD 5220.22-M practice.</span></div>
+          <select class="select" id="fe-method">${METHODS.map(m => `<option value="${m.id}" ${S.method === m.id ? 'selected' : ''}>${esc(m.label)}${m.id === a.pattern?.recommended ? ' (recommended)' : ''}</option>`).join('')}</select>
+          <span class="hint">Three passes follow the older DoD 5220.22-M practice; they add time, not assurance.</span></div>
         <div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th class="num">Files</th><th class="num">Size</th><th class="num">Hidden streams / attributes</th></tr></thead>
           <tbody>${a.items.filter(i => i.exists).map(i => `<tr><td class="trunc mono" title="${esc(i.path)}">${esc(i.path)}</td><td class="num">${i.fileCount}</td><td class="num">${bytes(i.bytes)}</td><td class="num">${(i.streams || 0) + (i.xattrs || 0)}</td></tr>`).join('')}</tbody></table></div>
         ${traceRows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Trace</th><th>Type</th></tr></thead><tbody>${traceRows.map(r => `<tr><td class="trunc mono">${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</tbody></table></div>` : ''}
@@ -101,6 +137,15 @@ function prepareCard(a, running) {
         <button class="btn btn-danger btn-lg" id="fe-erase" ${!blocked.length && !running && fileCount(a) ? '' : 'disabled'}>Permanently delete ${fileCount(a)} file(s)</button>
       </div>
     </div>`;
+}
+
+function patternLine(a) {
+  const p = a.pattern;
+  if (!p) return '';
+  const m = METHODS.find(x => x.id === S.method);
+  const rec = S.method === p.recommended;
+  return `<div class="rec-line">${icon('star', 14)}<span>Overwrite: <b>${esc(m?.label || S.method)}</b> ${rec ? badge('Recommended', 'ok') : badge('Your choice', '')}
+    <span class="muted small">${esc(rec ? p.reason : 'Change it under Advanced options')}</span></span></div>`;
 }
 
 const removedTraces = (r) => r.traces.filter(t => /erased|removed/.test(t.result)).length;
@@ -149,44 +194,36 @@ function jobCard() {
     </div>`;
 }
 
-function bind() {
-  const add = (list) => { S.paths = [...new Set([...S.paths, ...list])]; analyze(); };
-  root.querySelector('#fe-add').addEventListener('click', async () => {
-    const picked = await pickPaths();
-    if (picked?.length) add(picked);
-  });
-  root.querySelector('#fe-sandbox').addEventListener('click', createSandbox);
-  root.querySelector('#fe-path').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && e.target.value.trim()) add([e.target.value.trim()]);
-  });
-  root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
-    S.paths.splice(+b.dataset.rm, 1);
-    if (S.paths.length) analyze(); else { S.analysis = null; render(); }
-  }));
-  root.querySelector('#fe-clean')?.addEventListener('change', e => { S.clean = e.target.checked; });
-  root.querySelector('#fe-journal')?.addEventListener('change', e => { S.journal = e.target.checked; });
-  root.querySelector('#fe-method')?.addEventListener('change', e => { S.method = e.target.value; });
-  root.querySelector('#fe-erase')?.addEventListener('click', erase);
+function bind(el) {
+  el.querySelector('#fe-clean')?.addEventListener('change', e => { S.clean = e.target.checked; });
+  el.querySelector('#fe-journal')?.addEventListener('change', e => { S.journal = e.target.checked; });
+  el.querySelector('#fe-method')?.addEventListener('change', e => { S.method = e.target.value; S.methodChosen = true; renderRest(); });
+  el.querySelector('#fe-erase')?.addEventListener('click', erase);
 }
 
 async function createSandbox() {
   try {
     const sb = await api('/api/files/sandbox', { method: 'POST' });
-    toast('Sample files created in the WipeX folder', 'ok');
-    S.paths = [...new Set([...S.paths, sb.path])];
+    toast('Sample files created', 'ok');
+    S.selected.clear();
+    S.selected.set(sb.path, { path: sb.path, name: `Sample set ${sb.path.split(/[\\/]/).pop()}`, isDir: true, size: 0 });
+    await xp?.go('');
     analyze();
   } catch (e) { reportError(e); }
 }
 
 async function analyze() {
+  if (!S.selected.size) return;
   S.analyzing = true;
   S.job = null;
-  render();
+  renderTray(); renderRest();
   try {
-    S.analysis = await api('/api/files/analyze', { method: 'POST', body: { paths: S.paths } });
+    S.analysis = await api('/api/files/analyze', { method: 'POST', body: { paths: paths() } });
+    if (!S.methodChosen && S.analysis.pattern) S.method = S.analysis.pattern.recommended;
   } catch (e) { reportError(e); S.analysis = null; }
   S.analyzing = false;
-  render();
+  renderTray(); renderRest();
+  root.querySelector('#fe-rest .card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function erase() {
@@ -195,22 +232,31 @@ async function erase() {
   const ok = await confirmDanger({
     title: `Permanently delete ${fileCount(a)} file(s)?`,
     sub: 'The files are overwritten and removed. They cannot be recovered afterwards.',
-    rows: [['Items', S.paths.map(p => `<div class="mono small trunc">${esc(p)}</div>`).join('')], ['Size', bytes(totalBytes(a))],
-           ['Remove Windows traces', S.clean ? 'Yes' : 'No'], ['Clear change journal', journal ? 'Yes' : 'No'], ['Operator', esc(getOperator())]],
+    rows: [['Items', paths().map(p => `<div class="mono small trunc">${esc(p)}</div>`).join('')], ['Size', bytes(totalBytes(a))],
+           ['Remove system traces', S.clean ? 'Yes' : 'No'], ['Clear change journal', journal ? 'Yes' : 'No'], ['Operator', esc(getOperator())]],
     confirmLabel: 'Delete permanently',
     approval: appRef.health?.dualApproval ? 'required' : '',
   });
   if (!ok) return;
+  const erased = paths();
   try {
     const { jobId } = await api('/api/files/erase', { method: 'POST', body: {
-      paths: S.paths, method: S.method, cleanTraces: S.clean, clearJournal: journal,
+      paths: erased, method: S.method, cleanTraces: S.clean, clearJournal: journal,
       approver: ok.approver || '', approverPassword: ok.approverPassword || '' } });
     S.job = { id: jobId, status: 'RUNNING', progress: 0, message: 'Starting' };
     S.analysis = null;
-    render();
-    const job = await waitForJob(jobId, j => { S.job = j; if (root.classList.contains('active')) render(); });
+    renderTray(); renderRest();
+    const job = await waitForJob(jobId, j => { S.job = j; if (visible()) renderRest(); });
     S.job = job;
-    if (job.status === 'COMPLETED') S.paths = [];
-    render();
+    if (job.status === 'COMPLETED') {
+      S.selected.clear();
+      // If the browser shows a folder that was just erased, step out to where it was
+      const norm = (p) => p.toLowerCase().replace(/[\\/]+$/, '');
+      const cur = norm(xp?.path || '');
+      const gone = erased.find(p => cur && (cur === norm(p) || cur.startsWith(`${norm(p)}\\`) || cur.startsWith(`${norm(p)}/`)));
+      if (gone) xp.go(gone.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '')); else xp?.refresh();
+    }
+    refreshDemo();
+    if (visible()) { renderTray(); renderRest(); }
   } catch (e) { reportError(e); }
 }

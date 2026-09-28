@@ -62,6 +62,27 @@ export async function api(path, { method = 'GET', body, raw = false } = {}) {
   return raw ? res : res.json();
 }
 
+// ── Demo mode (sample disks and sample files only, with a guided walkthrough) ──
+export const demo = { enabled: false, steps: [], completed: 0, total: 0 };
+const demoListeners = [];
+export function onDemoChange(fn) { demoListeners.push(fn); }
+const emitDemo = (switched) => demoListeners.forEach(fn => fn(demo, switched));
+
+/** Re-read the walkthrough progress (cheap: a few audit-log rows). */
+export async function refreshDemo() {
+  try { Object.assign(demo, await api('/api/demo')); } catch { /* engine offline */ }
+  emitDemo(false);
+  return demo;
+}
+
+export async function setDemo(on) {
+  Object.assign(demo, await api('/api/demo', { method: 'POST', body: { enabled: on } }));
+  emitDemo(true);
+  return demo;
+}
+
+export const nextDemoStep = () => demo.steps.find(s => !s.done) || null;
+
 /** URL for links and images (downloads cannot send headers, so the token rides in the query). */
 export function apiUrl(path) {
   if (!session.token || !path.startsWith('/api/')) return API_BASE + path;
@@ -142,6 +163,11 @@ const P = {
   disk: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h.01M11 14h6"/>',
   hold: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  usb: '<rect x="7" y="9" width="10" height="13" rx="2"/><path d="M9 9V3h6v6M11 5.5h.01M13 5.5h.01"/>',
+  play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/>',
+  star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
+  eraser: '<path d="M9 20h11"/><path d="M4.6 14.6l9.2-9.2a2 2 0 0 1 2.8 0l2.9 2.9a2 2 0 0 1 0 2.8L12 18.6a2 2 0 0 1-1.4.6H8.2a2 2 0 0 1-1.4-.6l-2.2-2.2a2 2 0 0 1 0-2.8z"/><path d="M9.2 10l5.4 5.4"/>',
+  percent: '<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
 };
 export function icon(name, size = 16, sw = 1.9) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
@@ -303,58 +329,21 @@ export async function askOperator() {
 
 export async function requireOperator() { return getOperator(); }
 
-// ── File picker ────────────────────────────────────────────────────────────
-export function pickPaths({ title = 'Choose files or folders', start = '' } = {}) {
-  return new Promise(resolve => {
-    const chosen = new Set();
-    let current = start;
-    const render = async (bd) => {
-      const list = bd.querySelector('.picker-list');
-      list.innerHTML = '<div class="empty">Loading…</div>';
-      try {
-        const data = await api(`/api/fs/list?path=${encodeURIComponent(current)}`);
-        current = data.path;
-        bd.querySelector('#picker-path').value = current;
-        bd.querySelector('#picker-up').disabled = !current;
-        list.innerHTML = data.entries.length ? data.entries.map(e => `
-          <div class="picker-item ${e.protected ? 'locked' : ''}" data-path="${esc(e.path)}" data-dir="${e.isDir ? 1 : 0}" title="${e.protected ? 'Protected location — cannot be erased' : ''}">
-            ${e.protected ? `<span>${icon('lock', 14)}</span>` : `<input type="checkbox" ${chosen.has(e.path) ? 'checked' : ''}>`}
-            <span class="${e.isDir ? 'dir' : ''}">${icon(e.isDir ? 'folder' : 'file', 16)}</span>
-            <span class="trunc">${esc(e.name)}</span>
-            <span class="muted small">${e.isDir ? '' : bytes(e.size)}</span>
-          </div>`).join('') : '<div class="empty">Empty folder</div>';
-        list.querySelectorAll('.picker-item').forEach(row => {
-          const cb = row.querySelector('input');
-          cb && cb.addEventListener('click', ev => { ev.stopPropagation(); cb.checked ? chosen.add(row.dataset.path) : chosen.delete(row.dataset.path); updateCount(bd); });
-          row.addEventListener('click', () => {
-            if (row.dataset.dir === '1') { current = row.dataset.path; render(bd); }
-            else if (cb) { cb.checked = !cb.checked; cb.checked ? chosen.add(row.dataset.path) : chosen.delete(row.dataset.path); updateCount(bd); }
-          });
-        });
-        bd._parent = data.parent;
-        bd._workspace = data.workspace;
-      } catch (e) { list.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-    };
-    const updateCount = bd => { bd.querySelector('#picker-count').textContent = `${chosen.size} selected`; };
-    modal({
-      title, wide: true,
-      sub: 'Click a folder to open it; tick items to select them. Protected system locations are locked.',
-      body: `
-        <div class="picker-path">
-          <button class="btn btn-secondary btn-sm" id="picker-up" title="Up one level">${icon('up', 14)}</button>
-          <input class="input mono" id="picker-path" placeholder="Type a path and press Enter">
-          <button class="btn btn-secondary btn-sm" id="picker-ws">WipeX workspace</button>
-        </div>
-        <div class="picker-list"></div>
-        <div class="muted small" id="picker-count">0 selected</div>`,
-      actions: [{ label: 'Cancel', value: null }, { label: 'Add selected', cls: 'btn-primary', onClick: () => [...chosen] }],
-      onMount: (bd) => {
-        bd.querySelector('#picker-up').addEventListener('click', () => { current = bd._parent || ''; render(bd); });
-        bd.querySelector('#picker-ws').addEventListener('click', () => { current = bd._workspace || ''; render(bd); });
-        bd.querySelector('#picker-path').addEventListener('keydown', e => { if (e.key === 'Enter') { current = e.target.value; render(bd); } });
-        render(bd);
-      },
-    }).then(resolve);
+// ── File picker (the file browser in a dialog) ───────────────────────────────
+/** pick: 'any' | 'folder' | 'file'. Resolves to an array of paths, or null when cancelled. */
+export async function pickPaths({ title = 'Choose files or folders', start = '', pick = 'any', multi = false } = {}) {
+  const { mountExplorer } = await import('./explorer.js');
+  const selected = new Map();
+  const what = pick === 'folder' ? 'a folder' : pick === 'file' ? 'a file' : 'an item';
+  return modal({
+    title, wide: true,
+    sub: `Tick ${what}; double-click a folder to open it. Protected system locations show a lock.`,
+    body: '<div class="xp-modal"></div>',
+    actions: [{ label: 'Cancel', value: null }, { label: 'Choose', cls: 'btn-primary', onClick: () => {
+      if (!selected.size) { toast(`Tick ${what} first`, 'bad'); return false; }
+      return [...selected.keys()];
+    } }],
+    onMount: (bd) => mountExplorer(bd.querySelector('.xp-modal'), { multi, pick, start, selected }),
   });
 }
 

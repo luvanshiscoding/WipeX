@@ -1,5 +1,5 @@
 /** Recover deleted files: choose where to look, scan, review what can be recovered. */
-import { api, apiUrl, badge, bytes, esc, icon, pickPaths, progressBlock, reportError, short, statusBadge,
+import { api, apiUrl, badge, bytes, demo, esc, icon, pickPaths, progressBlock, refreshDemo, reportError, short, statusBadge,
   toast, waitForJob, when } from '../core.js';
 
 const S = {
@@ -23,32 +23,36 @@ export async function show(el, params) {
   S.labId = S.labId || imgs.find(i => i.hasTruth)?.id || imgs[0]?.id || '';
   S.benchImage = S.benchImage || imgs.find(i => i.hasTruth)?.id || '';
   S.evidenceId = S.evidenceId || sources.evidence?.[0]?.id || '';
-  if (!S.drive) S.drive = (sources.drives || []).find(d => d.removable)?.letter || '';
-  if (!(sources.drives || []).length && S.kind === 'drive') S.kind = 'lab';
+  if (!S.drive) S.drive = (sources.drives || []).find(d => d.removable)?.id || '';
+  if (!(sources.drives || []).length && S.kind === 'drive') S.kind = 'path';
   render();
 }
 
+const KINDS = [['drive', 'Drive / USB'], ['evidence', 'Case evidence'], ['path', 'Image file']];
+
 function render() {
   const running = S.job?.status === 'RUNNING';
+  if (demo.enabled) S.kind = 'lab';
+  else if (S.kind === 'lab') S.kind = (S.sources?.drives || []).length ? 'drive' : 'path';
   root.innerHTML = `
     <div class="page-head">
       <div>
         <h1 class="page-title">Recover deleted files</h1>
-        <p class="page-desc">Find files that were deleted from a drive, USB stick or disk image and get them back. The source is only read, never changed.</p>
+        <p class="page-desc">Get back files deleted from a USB drive, disk or image. The source is only read, never changed.</p>
       </div>
     </div>
     <div class="card">
-      <div class="card-head"><span class="card-title">1 · Where should WipeX look?</span>
-        <div class="seg">${[['drive', 'Drive / USB'], ['lab', 'Sample disk'], ['evidence', 'Case evidence'], ['path', 'Image file']].map(([k, l]) =>
-          `<button data-kind="${k}" class="${S.kind === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="card-head"><span class="card-title">1 · ${demo.enabled ? 'Sample disk' : 'Where should WipeX look?'}</span>
+        ${demo.enabled ? badge('Demo mode', 'warn') : `<div class="seg">${KINDS.map(([k, l]) =>
+          `<button data-kind="${k}" class="${S.kind === k ? 'on' : ''}">${l}</button>`).join('')}</div>`}</div>
       <div class="card-body">${sourceBody()}</div>
       <div class="card-body" style="border-top:1px solid var(--border)">
         <div class="label" style="margin-bottom:8px">2 · How thorough?</div>
         <div class="choice-row">
           <label class="choice ${!S.deep ? 'on' : ''}"><input type="radio" name="rc-mode" value="quick" ${!S.deep ? 'checked' : ''}>
-            <b>Quick scan</b><span>Reads the file system for recently deleted files. Seconds.</span></label>
+            <b>Quick scan</b><span>Deleted files still listed by the file system. Seconds.</span></label>
           <label class="choice ${S.deep ? 'on' : ''}"><input type="radio" name="rc-mode" value="deep" ${S.deep ? 'checked' : ''}>
-            <b>Deep scan</b><span>Also searches every block for photos, documents and archives, even after a format. ${estimate()}</span></label>
+            <b>Deep scan</b><span>Also searches every block, even after a format. ${estimate()}</span></label>
         </div>
       </div>
       <div class="card-foot"><button class="btn btn-primary btn-lg" id="rc-start" ${running ? 'disabled' : ''}>${icon('search', 16)} ${running ? 'Scanning…' : 'Scan for deleted files'}</button></div>
@@ -61,8 +65,9 @@ function render() {
 function driveCard(d) {
   const tags = [d.removable ? badge('USB / removable', 'blue') : '', d.isSystem ? badge('System drive', 'warn') : '',
     d.mediaType === 'SSD' ? badge('SSD') : d.mediaType === 'HDD' ? badge('Hard disk') : ''].join('');
-  return `<button class="pick ${S.drive === d.letter ? 'on' : ''}" data-drive="${d.letter}">
-    <div class="pick-top"><span class="pick-title">${esc(d.letter)}: ${esc(d.label || 'Local disk')}</span><span class="pick-tags">${tags}</span></div>
+  const title = d.letter ? `${d.letter}: ${d.label || 'Local disk'}` : `${d.label || (d.removable ? 'USB drive' : 'Volume')} · ${d.id}`;
+  return `<button class="pick ${S.drive === d.id ? 'on' : ''}" data-drive="${esc(d.id)}">
+    <div class="pick-top"><span class="pick-title">${esc(title)}</span><span class="pick-tags">${tags}</span></div>
     <div class="pick-meta"><span>${esc(d.fileSystem)}</span><b>${bytes(d.size)}</b></div>
   </button>`;
 }
@@ -71,25 +76,35 @@ function sourceBody() {
   const src = S.sources || {};
   if (S.kind === 'drive') {
     const drives = src.drives || [];
-    if (!drives.length) return `<div class="empty">${src.platform === 'Windows' ? 'No drives found.' : 'Scanning drives by letter is available on Windows. Use an image file instead.'}</div>`;
-    const d = drives.find(x => x.letter === S.drive);
+    if (!drives.length) return `<div class="empty">No drive found. Plug in a USB drive and reopen this page${src.platform === 'Windows' ? '' : ' (APFS volumes cannot be read directly; use an image file)'}.</div>`;
+    const d = drives.find(x => x.id === S.drive);
     const ssd = d && d.mediaType === 'SSD' && d.trim;
+    const sorted = [...drives].sort((x, y) => (y.removable ? 1 : 0) - (x.removable ? 1 : 0));
     return `
-      ${src.elevated ? '' : `<div class="notice warn" style="margin-bottom:12px">${icon('alert', 16)}<div><strong>Administrator rights needed</strong>Reading a drive directly needs WipeX to run as Administrator. Sample disks and image files work without it.</div></div>`}
-      <div class="pick-grid">${drives.map(driveCard).join('')}</div>
+      ${src.elevated ? '' : `<div class="notice warn" style="margin-bottom:12px">${icon('alert', 16)}<div><strong>${src.platform === 'Windows' ? 'Administrator rights needed' : 'Root rights needed'}</strong>${src.platform === 'Windows' ? 'Start WipeX with WipeX.cmd to read drives directly.' : 'Start WipeX with sudo python3 wipex.py to read drives directly.'}</div></div>`}
+      <div class="pick-grid">${sorted.map(driveCard).join('')}</div>
+      ${drives.some(x => x.removable) ? '' : '<div class="muted small" style="margin-top:10px">No USB drive found: plug one in and reopen this page.</div>'}
       ${d ? `<div class="field" style="margin-top:14px"><label for="rc-folder">Only look in this folder (optional)</label>
-        <div class="row"><input class="input mono" id="rc-folder" value="${esc(S.folder)}" placeholder="${esc(d.letter)}:\\Users\\…\\Documents" style="flex:1">
+        <div class="row"><input class="input mono" id="rc-folder" value="${esc(S.folder)}" placeholder="${d.letter ? `${esc(d.letter)}:\\Photos` : esc((d.mount || '') + '/Photos')}" style="flex:1">
         <button class="btn btn-secondary btn-sm" id="rc-browse">Browse</button></div>
         <span class="hint">Faster on large drives. Leave empty to scan the whole drive.</span></div>` : ''}
-      ${ssd ? `<div class="notice" style="margin-top:12px">${icon('info', 16)}<div><strong>This is an SSD</strong>SSDs erase deleted data on their own within seconds (TRIM), so deleted files often cannot be brought back. A USB stick or hard disk shows recovery best.</div></div>` : ''}
+      ${ssd ? `<div class="notice" style="margin-top:12px">${icon('info', 16)}<div><strong>This is an SSD</strong>SSDs wipe deleted data on their own (TRIM). A USB stick or hard disk shows recovery best.</div></div>` : ''}
       ${d?.sameAsWorkspace ? `<div class="muted small" style="margin-top:8px">Recovered files are saved in the WipeX folder on this same drive.</div>` : ''}`;
   }
   if (S.kind === 'lab') {
     const imgs = src.labImages || [];
+    const img = imgs.find(i => i.id === S.labId);
+    const formatted = img?.imageKind === 'formatted';
     return imgs.length ? `<div class="field"><label for="rc-lab">Sample disk</label>
-      <select class="select" id="rc-lab">${imgs.map(i => `<option value="${i.id}" ${i.id === S.labId ? 'selected' : ''}>${esc(i.model)} · ${esc(i.capacity)}</option>`).join('')}</select>
-      <span class="hint">A disk image with ordinary, deleted and fragmented files, safe to experiment with.</span></div>`
-      : '<div class="empty">No sample disks yet. Create one in Erase Drive.</div>';
+      <select class="select" id="rc-lab">${imgs.map(i => `<option value="${i.id}" ${i.id === S.labId ? 'selected' : ''}>${esc(i.model)} · ${esc(i.capacity)}${i.imageKind === 'formatted' ? ' · formatted' : ''}</option>`).join('')}</select>
+      <span class="hint">${formatted ? 'Quick-formatted: the file system lists nothing, only a deep scan can bring the files back.' : 'Holds ordinary, deleted and fragmented files (photos split in pieces included).'}</span></div>
+      <div class="format-demo">
+        <div>${icon('drive', 16)} <b>${formatted ? 'This disk was formatted' : 'Try recovery after a format'}</b>
+          <span class="muted small">${formatted ? 'Run the scan: files come back from their data blocks, each with a confidence score.' : 'Quick-format the sample disk the way Windows does, then scan it.'}</span></div>
+        ${formatted ? `<button class="btn btn-secondary btn-sm" id="rc-refill">${icon('refresh', 14)} Refill with sample data</button>`
+          : `<button class="btn btn-secondary btn-sm" id="rc-format">${icon('drive', 14)} Quick-format this disk</button>`}
+      </div>`
+      : '<div class="empty">No sample disks yet. Use “Reset sample data” on the Overview.</div>';
   }
   if (S.kind === 'evidence') {
     const ev = src.evidence || [];
@@ -104,7 +119,7 @@ function sourceBody() {
 }
 
 function estimate() {
-  const d = (S.sources?.drives || []).find(x => x.letter === S.drive);
+  const d = (S.sources?.drives || []).find(x => x.id === S.drive);
   if (S.kind !== 'drive' || !d || S.folder) return '';
   const min = Math.max(1, Math.round(d.size / (120 * 1e6) / 60));
   return `About ${min} min for this drive.`;
@@ -115,14 +130,17 @@ function bind() {
   root.querySelectorAll('[data-drive]').forEach(b => b.addEventListener('click', () => { S.drive = b.dataset.drive; S.folder = ''; render(); }));
   root.querySelector('#rc-folder')?.addEventListener('input', e => { S.folder = e.target.value; });
   root.querySelector('#rc-browse')?.addEventListener('click', async () => {
-    const p = await pickPaths({ title: 'Choose the folder to search', start: `${S.drive}:\\` });
+    const dv = (S.sources?.drives || []).find(x => x.id === S.drive) || {};
+    const p = await pickPaths({ title: 'Choose the folder to search', pick: 'folder', start: dv.letter ? `${dv.letter}:\\` : (dv.mount || '') });
     if (p?.[0]) { S.folder = p[0]; render(); }
   });
   root.querySelector('#rc-pick')?.addEventListener('click', async () => {
-    const p = await pickPaths({ title: 'Choose a disk image file' });
+    const p = await pickPaths({ title: 'Choose a disk image file', pick: 'file' });
     if (p?.[0]) { S.path = p[0]; render(); }
   });
-  root.querySelector('#rc-lab')?.addEventListener('change', e => { S.labId = e.target.value; });
+  root.querySelector('#rc-lab')?.addEventListener('change', e => { S.labId = e.target.value; render(); });
+  root.querySelector('#rc-format')?.addEventListener('click', () => labAction('format', 'Sample disk quick-formatted: run a deep scan'));
+  root.querySelector('#rc-refill')?.addEventListener('click', () => labAction('reset', 'Sample disk refilled with sample data'));
   root.querySelector('#rc-ev')?.addEventListener('change', e => { S.evidenceId = e.target.value; });
   root.querySelector('#rc-path')?.addEventListener('input', e => { S.path = e.target.value; });
   root.querySelectorAll('input[name=rc-mode]').forEach(r => r.addEventListener('change', e => { S.deep = e.target.value === 'deep'; render(); }));
@@ -139,6 +157,16 @@ function bind() {
   root.querySelector('#rc-partial')?.addEventListener('change', e => { S.partial = e.target.checked; });
   root.querySelector('#bm-img')?.addEventListener('change', e => { S.benchImage = e.target.value; });
   root.querySelector('#bm-run')?.addEventListener('click', runBenchmark);
+}
+
+async function labAction(action, done) {
+  try {
+    await api(`/api/lab/images/${S.labId}/${action}`, { method: 'POST' });
+    S.sources = await api('/api/recovery/sources');
+    if (action === 'format') S.deep = true;
+    toast(done, 'ok');
+    render();
+  } catch (e) { reportError(e); }
 }
 
 function currentSource() {
@@ -158,9 +186,10 @@ async function start() {
       source, useFs: true, useCarving: deep, types: S.types.length ? S.types : null, includePartial: S.partial } });
     S.job = { id: jobId, status: 'RUNNING', progress: 0, message: 'Starting' };
     render();
-    const job = await waitForJob(jobId, j => { S.job = j; if (root.classList.contains('active')) render(); });
+    const job = await waitForJob(jobId, j => { S.job = j; if (root.isConnected && root.classList.contains('active')) render(); });
     S.job = job;
     S.history = await api('/api/jobs?kind=recovery').catch(() => S.history);
+    refreshDemo();
     render();
     if (job.status !== 'COMPLETED') toast(job.message, 'bad');
   } catch (e) { reportError(e); }
@@ -195,13 +224,14 @@ function foundFiles(r) {
   const fsDeleted = (r.filesystem?.entries || []).filter(e => e.deleted && !e.isDir && e.size > 0).map(e => ({
     name: e.name, where: e.path.slice(0, -e.name.length) || '/', size: e.size, when: e.modified,
     condition: e.contentStatus || 'unreadable', detail: e.detail, file: e.recoveredPath, how: 'File system',
+    confidence: e.confidence,
   }));
   const carvedFiles = (r.carving?.files || []).filter(f => !f.alsoFoundAs);
   const carved = carvedFiles.map(f => ({
     name: `${f.id}.${f.ext}`, size: f.size, when: null,
     where: f.fragments?.length > 1 ? `Name not known · rebuilt from ${f.fragments.length} pieces found in free space`
       : 'Name not known (found in free space)',
-    condition: f.status === 'partial' ? 'damaged' : 'intact', file: f.path,
+    condition: f.status === 'partial' ? 'damaged' : 'intact', file: f.path, confidence: f.confidence,
     how: f.fragments?.length > 1 ? `Deep scan · rebuilt from ${f.fragments.length} pieces` : 'Deep scan',
   }));
   for (const e of fsDeleted) {             // a damaged deleted file whose intact copy the deep scan rebuilt
@@ -221,13 +251,14 @@ function resultsCard() {
   const files = foundFiles(r);
   const ok = files.filter(f => ['intact', 'unverified'].includes(f.condition) && f.file);
   const empty = (r.filesystem?.entries || []).filter(e => e.deleted && !e.isDir && !(e.size > 0)).length;
+  const high = files.filter(f => (f.confidence || 0) >= 0.85).length;
   const headline = (files.length
     ? `${files.length} deleted file${files.length === 1 ? '' : 's'} found · ${ok.length} recovered`
     : 'No deleted files found') + (empty ? ` · ${empty} empty entr${empty === 1 ? 'y' : 'ies'} ignored` : '');
   return `
     <div class="card">
       <div class="card-head">
-        <div><div class="card-title">${esc(headline)}</div><div class="card-sub">${esc(r.sourceLabel || r.source)} · ${esc(when(j.finished_at))}</div></div>
+        <div><div class="card-title">${esc(headline)}</div><div class="card-sub">${esc(r.sourceLabel || r.source)} · ${esc(when(j.finished_at))}${files.length ? ` · ${high} with high confidence` : ''}</div></div>
         <div class="row">
           ${ok.length ? `<button class="btn btn-primary btn-sm" id="rc-open">${icon('folder', 14)} Open recovered files</button>` : ''}
           <a class="btn btn-secondary btn-sm" href="${apiUrl(`/api/recovery/${j.id}/report.pdf`)}" target="_blank" rel="noopener">${icon('download', 14)} Report</a>
@@ -235,7 +266,7 @@ function resultsCard() {
       </div>
       ${r.warning ? `<div class="card-body" style="padding-bottom:0"><div class="notice warn">${icon('alert', 16)}<div>${esc(r.warning)}</div></div></div>` : ''}
       ${files.length ? `<div class="table-wrap" style="max-height:560px;overflow:auto"><table class="table">
-        <thead><tr><th></th><th>File</th><th class="num">Size</th><th>Condition</th><th></th></tr></thead><tbody>
+        <thead><tr><th></th><th>File</th><th class="num">Size</th><th>Condition</th><th title="How sure WipeX is that the file is the original, from the checks it passed">Confidence</th><th></th></tr></thead><tbody>
         ${files.map(fileRow).join('')}</tbody></table></div>`
         : `<div class="empty">${esc(r.filesystem?.reason || 'Nothing deleted was found here. Try a deep scan, or a folder where files were deleted.')}</div>`}
       ${technicalDetails(r)}
@@ -252,7 +283,16 @@ function fileRow(f) {
     <td><div style="font-weight:600" class="trunc">${esc(f.name)}</div><div class="muted small trunc" title="${esc(f.where)}">${esc(f.where)}${f.when ? ` · deleted file last changed ${esc(when(f.when))}` : ''}</div></td>
     <td class="num">${bytes(f.size)}</td>
     <td>${badge(label, tone)}${f.note || hint ? `<div class="muted small">${esc(f.note || hint)}</div>` : ''}</td>
+    <td>${confidence(f.confidence)}</td>
     <td class="nowrap">${actions}</td></tr>`;
+}
+
+/** Confidence meter: high when the file's own structure (checksums, decoder) validated end to end. */
+export function confidence(c) {
+  if (c == null) return '<span class="muted small">—</span>';
+  const pct = Math.round(c * 100);
+  const tone = c >= 0.85 ? 'ok' : c >= 0.5 ? 'warn' : 'bad';
+  return `<div class="conf ${tone}" title="${pct}% · ${c >= 0.85 ? 'High' : c >= 0.5 ? 'Medium' : 'Low'} confidence"><span class="conf-bar"><span style="width:${pct}%"></span></span><span class="conf-num">${pct}%</span></div>`;
 }
 
 function technicalDetails(r) {
@@ -260,7 +300,7 @@ function technicalDetails(r) {
   const carved = r.carving?.files || [];
   const vols = (fs.volumes || []).map(v => v.fsType).join(', ') || 'none recognised';
   const rows = carved.map(f => `<tr><td class="mono">${esc(f.id)}</td><td>${esc(f.ext.toUpperCase())}</td><td class="num">${bytes(f.size)}</td>
-    <td class="mono">${f.offset.toLocaleString()}</td><td>${esc(f.technique)}</td><td class="mono" title="${esc(f.sha256)}">${short(f.sha256, 12)}</td>
+    <td class="mono">${f.offset.toLocaleString()}</td><td>${esc(f.technique)}</td><td class="num">${Math.round((f.confidence || 0) * 100)}%</td><td class="mono" title="${esc(f.sha256)}">${short(f.sha256, 12)}</td>
     <td class="small">${f.alsoFoundAs ? esc(f.alsoFoundAs) : '—'}</td></tr>`).join('');
   const del = (fs.entries || []).filter(e => e.deleted && !e.isDir).map(e => `<tr><td class="trunc">${esc(e.path)}</td>
     <td class="num mono">${e.inode ?? ''}</td><td>${esc(e.contentStatus || '')}</td><td class="mono" title="${esc(e.sha256 || '')}">${short(e.sha256, 12)}</td></tr>`).join('');
@@ -269,7 +309,7 @@ function technicalDetails(r) {
       <dt>Blocks searched</dt><dd>${r.carving?.bytesScanned ? `${bytes(r.carving.bytesScanned)} at ${r.carving.throughputMBps} MB/s` : 'Quick scan (not searched)'}</dd>
       <dt>Scan time</dt><dd>${r.seconds}s</dd><dt>Job</dt><dd class="mono">${esc(S.job.id)}</dd></dl>
     ${del ? `<div class="label" style="margin:12px 0 6px">Deleted file-system entries</div><div class="table-wrap"><table class="table"><thead><tr><th>Path</th><th class="num">Record</th><th>Content check</th><th>SHA-256</th></tr></thead><tbody>${del}</tbody></table></div>` : ''}
-    ${rows ? `<div class="label" style="margin:12px 0 6px">Files found by searching blocks (carving)</div><div class="table-wrap"><table class="table"><thead><tr><th>ID</th><th>Type</th><th class="num">Size</th><th class="num">Offset</th><th>Technique</th><th>SHA-256</th><th>Also in file system</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+    ${rows ? `<div class="label" style="margin:12px 0 6px">Files found by searching blocks (carving)</div><div class="table-wrap"><table class="table"><thead><tr><th>ID</th><th>Type</th><th class="num">Size</th><th class="num">Offset</th><th>Technique</th><th class="num">Confidence</th><th>SHA-256</th><th>Also in file system</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
   </div></details>`;
 }
 
@@ -313,7 +353,7 @@ async function runBenchmark() {
     const { jobId } = await api('/api/benchmark', { method: 'POST', body: { imageId: S.benchImage } });
     S.bench = { status: 'RUNNING', progress: 0, message: 'Starting' };
     render();
-    S.bench = await waitForJob(jobId, j => { S.bench = j; if (root.classList.contains('active')) render(); });
+    S.bench = await waitForJob(jobId, j => { S.bench = j; if (root.isConnected && root.classList.contains('active')) render(); });
     render();
   } catch (e) { reportError(e); }
 }

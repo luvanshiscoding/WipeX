@@ -10,8 +10,9 @@ whether a deleted file's clusters still hold the original content or were reused
 import hashlib
 import os
 import re
+import struct
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import ewf
 
@@ -141,7 +142,7 @@ def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bo
                         "description": vol["description"], "blockSize": fs.info.block_size})
         seen = set()
 
-        def walk(directory, parent: str, depth: int):
+        def walk(directory, parent: str, depth: int, gone: bool = False):
             if depth > 32 or len(entries) >= max_entries:
                 return
             for entry in directory:
@@ -150,7 +151,7 @@ def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bo
                 if name in (".", "..") or name.startswith("$OrphanFiles"):
                     continue
                 meta = entry.info.meta
-                deleted = bool(int(name_info.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC))
+                deleted = gone or bool(int(name_info.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC))
                 is_dir = bool(meta and int(meta.type) == int(pytsk3.TSK_FS_META_TYPE_DIR)) or \
                     int(name_info.type) == int(pytsk3.TSK_FS_NAME_TYPE_DIR)
                 path = f"{parent}/{name}"
@@ -167,11 +168,13 @@ def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bo
 
                 if is_dir and meta is not None:
                     key = (vi, int(meta.addr))
-                    if key in seen or deleted:
+                    # A deleted folder keeps its entries in its own directory data (e.g. after Shift+Delete of a
+                    # whole folder): walk it too, unless its record now belongs to something else.
+                    if key in seen or (deleted and rec["metaAllocated"]):
                         continue
                     seen.add(key)
                     try:
-                        walk(entry.as_directory(), path, depth + 1)
+                        walk(entry.as_directory(), path, depth + 1, deleted)
                     except IOError:
                         continue
                 elif deleted and meta is not None and extract_deleted and out_dir and 0 < rec["size"] <= MAX_EXTRACT:
@@ -190,6 +193,8 @@ def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bo
                 return {"available": True, "volumes": volumes, "entries": [],
                         "reason": f"Folder {start} was not found on this volume"}
             continue
+        if not start_path and fs_type.startswith("NTFS"):
+            _ntfs_unlinked(fs, vi, entries, out_dir if extract_deleted else None, max_entries)
 
     deleted = [e for e in entries if e["deleted"] and not e["isDir"]]
     if progress:
@@ -205,7 +210,97 @@ def _scan_img(img, source_path: str, out_dir: Optional[str], extract_deleted: bo
     }
 
 
+MFT_SWEEP_LIMIT = 2_000_000
+
+
+def _ntfs_file_name(f) -> Tuple[str, int]:
+    """Long name and parent reference (record number + sequence) from a record's $FILE_NAME attribute(s)."""
+    best, parent = "", -1
+    for attr in f:
+        if int(attr.info.type) != int(pytsk3.TSK_FS_ATTR_TYPE_NTFS_FNAME):
+            continue
+        try:
+            raw = f.read_random(0, int(attr.info.size), attr.info.type, attr.info.id)
+        except IOError:
+            continue
+        if len(raw) < 66:
+            continue
+        nlen, namespace = raw[64], raw[65]
+        name = raw[66:66 + 2 * nlen].decode("utf-16-le", "replace")
+        if namespace != 2 or not best:                        # 2 = DOS 8.3 alias: keep only as a fallback
+            best, parent = name, struct.unpack_from("<Q", raw, 0)[0]
+    return best, parent
+
+
+def _ntfs_folder(fs, ref: int, dirs: Dict[int, str], cache: Dict[int, str], depth: int = 0) -> str:
+    """Path of the folder a deleted record points to; deleted folders are named from their own records."""
+    addr, seq = ref & 0xFFFFFFFFFFFF, ref >> 48
+    if addr == 5:                                              # the root folder
+        return ""
+    if addr in dirs:
+        return dirs[addr]
+    if addr not in cache:
+        cache[addr] = "/(deleted folder)"
+        try:
+            f = fs.open_meta(inode=addr)
+            m = f.info.meta
+            # Same folder, possibly deleted since (deleting a record raises its sequence number by one)
+            if depth < 16 and m is not None and int(m.type) == int(pytsk3.TSK_FS_META_TYPE_DIR) \
+                    and int(getattr(m, "seq", seq)) in (seq, seq + 1):
+                name, parent = _ntfs_file_name(f)
+                if name:
+                    cache[addr] = f"{_ntfs_folder(fs, parent, dirs, cache, depth + 1)}/{name}"
+        except IOError:
+            pass
+    return cache[addr]
+
+
+def _ntfs_unlinked(fs, vi: int, entries: List[Dict[str, object]], out_dir: Optional[str], max_entries: int) -> None:
+    """
+    NTFS: when a whole folder is deleted, Windows raises the folder record's sequence number, so The Sleuth
+    Kit no longer links the deleted files to it and lists them nowhere. Their MFT records still hold name,
+    parent, size and data runs: sweep the MFT for deleted file records not listed yet and add them under the
+    deleted folder's path when it is known.
+    """
+    have = {(e["volume"], e["inode"]) for e in entries}
+    dirs = {e["inode"]: e["path"] for e in entries if e["volume"] == vi and e["isDir"] and e["inode"] is not None}
+    folders: Dict[int, str] = {}
+    alloc, reg = int(pytsk3.TSK_FS_META_FLAG_ALLOC), int(pytsk3.TSK_FS_META_TYPE_REG)
+    for addr in range(16, min(int(fs.info.last_inum), MFT_SWEEP_LIMIT) + 1):   # 0-15 are NTFS system files
+        if len(entries) >= max_entries:
+            return
+        if (vi, addr) in have:
+            continue
+        try:
+            f = fs.open_meta(inode=addr)
+        except IOError:
+            continue
+        meta = f.info.meta
+        if meta is None or int(meta.flags) & alloc or int(meta.type) != reg:
+            continue
+        name, parent = _ntfs_file_name(f)
+        if not name:
+            continue
+        rec = {"volume": vi, "path": f"{_ntfs_folder(fs, parent, dirs, folders)}/{name}", "name": name, "isDir": False,
+               "deleted": True, "inode": addr, "size": int(meta.size), "modified": _ts(meta.mtime),
+               "created": _ts(meta.crtime), "accessed": _ts(meta.atime), "metaAllocated": False}
+        entries.append(rec)
+        if out_dir and 0 < rec["size"] <= MAX_EXTRACT:
+            _extract(f, rec, out_dir)
+
+
+# Confidence that a recovered deleted file is the original, from what the checks could prove:
+# name and size from the file system and a structure that validates end to end (intact), content
+# present but with no structure to check (unverified), and so on down to blocks already reused.
+CONFIDENCE = {"intact": 0.97, "unverified": 0.6, "damaged": 0.35, "overwritten": 0.05, "zeroed": 0.0, "unreadable": 0.0}
+
+
 def _extract(entry, rec: Dict[str, object], out_dir: str) -> None:
+    _extract_content(entry, rec, out_dir)
+    rec["confidence"] = CONFIDENCE.get(str(rec.get("contentStatus")), 0.0)
+
+
+def _extract_content(entry, rec: Dict[str, object], out_dir: str) -> None:
     try:
         data = entry.read_random(0, int(rec["size"]))
     except IOError as exc:
@@ -248,51 +343,66 @@ def dir_traces(device: str, dir_path: str, names: List[str], hashes: set,
     subfolders are searched too, since an erased folder's entries live on in its own directory data.
     Used to verify a file erasure from the forensic side.
     """
+    return dir_traces_many(device, [(dir_path, names, hashes)], max_bytes, depth)[0]
+
+
+def dir_traces_many(device: str, targets: List[Tuple[str, List[str], set]],
+                    max_bytes: int = 64 * 1024 * 1024, depth: int = 4) -> List[Dict[str, object]]:
+    """dir_traces for several folders of one volume, opening the file system once (on a large NTFS
+    volume The Sleuth Kit needs 10-20 s to open it, so this keeps a multi-folder check to one open)."""
     if not HAS_TSK:
-        return {"checked": False, "reason": "The Sleuth Kit (pytsk3) is not installed"}
-    wanted = {n.lower() for n in names}
+        return [{"checked": False, "reason": "The Sleuth Kit (pytsk3) is not installed"} for _ in targets]
     img = _open_img(device)
     try:
-        fs = pytsk3.FS_Info(img, offset=0)
-        name_hits: List[str] = []
-        content_hits: List[str] = []
-        seen: set = set()
-        count = [0]
-
-        def walk(directory, level: int) -> None:
-            for entry in directory:
-                if count[0] >= 50000:
-                    return
-                name = entry.info.name.name.decode("utf-8", "replace")
-                if name in (".", ".."):
-                    continue
-                count[0] += 1
-                if name.lower() in wanted:
-                    name_hits.append(name)
-                meta = entry.info.meta
-                if meta is None or not int(entry.info.name.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC):
-                    continue
-                if int(meta.type) == int(pytsk3.TSK_FS_META_TYPE_DIR):
-                    if level < depth and int(meta.addr) not in seen:
-                        seen.add(int(meta.addr))
-                        try:
-                            walk(entry.as_directory(), level + 1)
-                        except IOError:
-                            pass
-                elif hashes and 0 < int(meta.size) <= max_bytes:
-                    try:
-                        data = entry.read_random(0, int(meta.size))
-                    except IOError:
-                        continue
-                    if hashlib.sha256(data).hexdigest() in hashes:
-                        content_hits.append(name)
-
-        walk(fs.open_dir(path=dir_path or "/"), 0)
-        return {"checked": True, "entries": count[0], "namesFound": name_hits, "contentFound": content_hits}
-    except IOError as exc:
-        return {"checked": False, "reason": f"Could not read the folder from the volume: {exc}"}
+        try:
+            fs = pytsk3.FS_Info(img, offset=0)
+        except IOError as exc:
+            return [{"checked": False, "reason": f"Could not read the folder from the volume: {exc}"} for _ in targets]
+        return [_dir_traces_in(fs, dir_path, names, hashes, max_bytes, depth) for dir_path, names, hashes in targets]
     finally:
         try:
             img.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _dir_traces_in(fs, dir_path: str, names: List[str], hashes: set, max_bytes: int, depth: int) -> Dict[str, object]:
+    wanted = {n.lower() for n in names}
+    name_hits: List[str] = []
+    content_hits: List[str] = []
+    seen: set = set()
+    count = [0]
+
+    def walk(directory, level: int) -> None:
+        for entry in directory:
+            if count[0] >= 50000:
+                return
+            name = entry.info.name.name.decode("utf-8", "replace")
+            if name in (".", ".."):
+                continue
+            count[0] += 1
+            if name.lower() in wanted:
+                name_hits.append(name)
+            meta = entry.info.meta
+            if meta is None or not int(entry.info.name.flags) & int(pytsk3.TSK_FS_NAME_FLAG_UNALLOC):
+                continue
+            if int(meta.type) == int(pytsk3.TSK_FS_META_TYPE_DIR):
+                if level < depth and int(meta.addr) not in seen:
+                    seen.add(int(meta.addr))
+                    try:
+                        walk(entry.as_directory(), level + 1)
+                    except IOError:
+                        pass
+            elif hashes and 0 < int(meta.size) <= max_bytes:
+                try:
+                    data = entry.read_random(0, int(meta.size))
+                except IOError:
+                    continue
+                if hashlib.sha256(data).hexdigest() in hashes:
+                    content_hits.append(name)
+
+    try:
+        walk(fs.open_dir(path=dir_path or "/"), 0)
+    except IOError as exc:
+        return {"checked": False, "reason": f"Could not read the folder from the volume: {exc}"}
+    return {"checked": True, "entries": count[0], "namesFound": name_hits, "contentFound": content_hits}
