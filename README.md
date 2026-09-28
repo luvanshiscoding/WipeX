@@ -96,7 +96,7 @@ Every job produces a PDF: a [sample certificate](docs/images/certificate.png) wi
 | Technique | Result |
 |---|---|
 | File system (The Sleuth Kit) | 6 of 7 deleted files intact (the 7th is reported as damaged: its clusters were reused) |
-| Carving | 13 of 13 carvable files, **0 false positives**; 3 fragmented files (PNG, ZIP, JPEG) rebuilt byte-exact; 80–105 MB/s |
+| Carving | 13 of 13 carvable files, **0 false positives**; 3 fragmented files (PNG, ZIP, JPEG) rebuilt byte-exact; 80–140 MB/s across runs |
 | Combined | **9 of 9** deleted and orphaned files; the same from an E01 container |
 | After a quick format | The file system lists nothing; carving returns every photo and document byte-exact |
 | Real drives (Windows, virtual USB disks) | A folder of 6 files deleted by Windows: 6 of 6 recovered **by name** on FAT32, exFAT and NTFS |
