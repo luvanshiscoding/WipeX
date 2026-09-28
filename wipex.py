@@ -133,8 +133,11 @@ def main() -> int:
         print("(For development you can instead run `npm run dev` and open http://localhost:5173.)")
 
     if args.replace:                                       # the old engine is shutting down: take its port
-        with open(elevation.takeover_marker(args.port), "w", encoding="utf-8") as f:
-            f.write(str(os.getpid()))
+        try:
+            with open(elevation.takeover_marker(args.port), "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+        except OSError:
+            pass
         deadline = time.time() + 30
         while not _port_free(args.port) and time.time() < deadline:
             time.sleep(0.3)

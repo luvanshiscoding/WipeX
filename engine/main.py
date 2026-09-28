@@ -551,8 +551,11 @@ def restart_elevated(request: Request, sess=Depends(signed_in)):
         return {"started": False, "elevated": True, "message": "WipeX already runs with Administrator / root rights"}
     port = request.url.port or 8000
     marker = elevation.takeover_marker(port)
-    if os.path.exists(marker):
-        os.remove(marker)
+    try:
+        if os.path.exists(marker):
+            os.remove(marker)                          # left by an earlier restart
+    except OSError:
+        return {"started": False, "message": f"Remove {marker} (left by an earlier restart) and try again"}
     res = elevation.relaunch(["--no-browser", "--port", str(port)], wait_for_port=True)
     if res["started"]:
         audit_log.append("system.restart_elevated", sess["username"])
@@ -693,7 +696,7 @@ def _unix_drives() -> List[Dict[str, Any]]:
                 continue
             if mount in ("/", "/boot", "/boot/efi", "/usr", "/var", "/home") or mount.startswith("/snap"):
                 continue
-            hot = bool(n.get("hotplug") or n.get("rm") or (parent or {}).get("hotplug") or (parent or {}).get("rm"))
+            hot = any(_flag(v) for v in (n.get("hotplug"), n.get("rm"), (parent or {}).get("hotplug"), (parent or {}).get("rm")))
             tran = str(n.get("tran") or (parent or {}).get("tran") or "")
             drives.append({"id": n["path"], "device": n["path"], "mount": mount, "label": n.get("label") or "",
                            "fileSystem": fstype.upper(), "size": int(n.get("size") or 0), "free": 0,
@@ -705,12 +708,24 @@ def _unix_drives() -> List[Dict[str, Any]]:
     return drives
 
 
+def _flag(v: Any) -> bool:
+    """lsblk before util-linux 2.33 prints booleans as "0" / "1" strings, and "0" would count as true."""
+    return v is True or v == 1 or str(v).strip().lower() in ("1", "true")
+
+
+def _is_usb(d: Dict[str, Any]) -> bool:
+    """A USB drive or memory card, whatever the OS calls it (Windows bus type, macOS external / removable
+    media, Linux hot-plug or USB / MMC transport)."""
+    kind = f"{d.get('type') or ''} {d.get('interface') or ''}".upper()
+    return _flag(d.get("removable")) or any(k in kind for k in ("USB", "SECURE DIGITAL", " SD", "MMC"))
+
+
 def _usb_disks(refresh: bool = False) -> List[Dict[str, Any]]:
     """Whole USB drives and memory cards, read raw: this also reaches a stick with no drive letter, no
     partition (e.g. after a whole-drive erase) or a damaged file system, which the volume list misses."""
     disks = []
     for d in _physical_devices(refresh):
-        if not d.get("removable") or d.get("isBootDrive") or d.get("isImage") or not d.get("devicePath"):
+        if not _is_usb(d) or d.get("isBootDrive") or d.get("isImage") or not d.get("devicePath"):
             continue
         dev = d["devicePath"]
         if platform.system() == "Darwin" and dev.startswith("/dev/disk"):

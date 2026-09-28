@@ -401,6 +401,21 @@ def _windows_device_size(path: str) -> int:
         k32.CloseHandle(handle)
 
 
+def _posix_device_size(f) -> int:
+    """Size of a disk or partition on macOS / Linux. macOS reports 0 when seeking to the end of a
+    device node, so ask the driver: DKIOCGETBLOCKSIZE x DKIOCGETBLOCKCOUNT (macOS), BLKGETSIZE64 (Linux)."""
+    import fcntl
+    import platform
+    import struct
+    fd = f.fileno()
+    if platform.system() == "Darwin":
+        block = struct.unpack("=I", fcntl.ioctl(fd, 0x40046418, b"\0" * 4))[0]
+        count = struct.unpack("=Q", fcntl.ioctl(fd, 0x40086419, b"\0" * 8))[0]
+        return block * count
+    size = f.seek(0, os.SEEK_END)
+    return size or struct.unpack("=Q", fcntl.ioctl(fd, 0x80081272, b"\0" * 8))[0]
+
+
 class RawImage:
     def __init__(self, path: str):
         self.path = path
@@ -409,6 +424,8 @@ class RawImage:
         self.f = open(path, "rb", buffering=0)
         if self.is_device and os.name == "nt":
             self.size = _windows_device_size(path)
+        elif self.is_device:
+            self.size = _posix_device_size(self.f)
         else:
             self.size = self.f.seek(0, os.SEEK_END)
 

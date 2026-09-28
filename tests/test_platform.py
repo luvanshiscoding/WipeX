@@ -455,6 +455,70 @@ class PlatformHelpers(unittest.TestCase):
         self.assertEqual([(d["id"], d["fileSystem"], d["removable"], d["mediaType"]) for d in drives],
                          [("/dev/sdb1", "EXFAT", True, "Flash")])
 
+    def test_usb_drives_recognised_on_every_os(self):
+        """Whole USB drives are recognised from each OS's own wording; old lsblk's "0" is not true."""
+        import main
+        self.assertTrue(main._is_usb({"removable": True, "type": "USB / removable"}))                  # Windows
+        self.assertTrue(main._is_usb({"removable": True, "type": "External drive", "interface": "USB"}))  # macOS
+        self.assertTrue(main._is_usb({"removable": "1", "type": "HDD", "interface": "sata"}))           # Linux, old lsblk
+        self.assertFalse(main._is_usb({"removable": "0", "type": "SATA SSD", "interface": "sata"}))
+        self.assertFalse(main._is_usb({"removable": False, "type": "NVMe SSD", "interface": "NVME"}))
+        import json as _json
+        from unittest import mock
+        lsblk = _json.dumps({"blockdevices": [
+            {"path": "/dev/sda", "type": "disk", "tran": "sata", "hotplug": "0", "rm": "0", "children": [
+                {"path": "/dev/sda2", "type": "part", "fstype": "ext4", "mountpoint": "/data", "size": "500000000000",
+                 "hotplug": "0", "rm": "0"}]}]}).encode()
+        with mock.patch.object(main.platform, "system", return_value="Linux"), \
+                mock.patch("subprocess.run", mock.Mock(return_value=mock.Mock(stdout=lsblk))):
+            self.assertEqual([d["removable"] for d in main._unix_drives()], [False])
+
+    def test_device_size_on_macos_and_linux(self):
+        """macOS reports 0 when seeking to the end of a disk node: the size comes from the driver."""
+        import types
+        from unittest import mock
+        calls = []
+
+        def ioctl(fd, req, buf):
+            calls.append(req)
+            return {0x40046418: struct.pack("=I", 512), 0x40086419: struct.pack("=Q", 62_521_344),
+                    0x80081272: struct.pack("=Q", 32_010_928_128)}[req]
+
+        class Dev:
+            def fileno(self):
+                return 3
+
+            def seek(self, *_):
+                return 0                                    # what a macOS /dev/rdiskN reports
+        fake = types.SimpleNamespace(ioctl=ioctl)
+        with mock.patch.dict(sys.modules, {"fcntl": fake}):
+            with mock.patch("platform.system", return_value="Darwin"):
+                self.assertEqual(ewf._posix_device_size(Dev()), 512 * 62_521_344)
+            with mock.patch("platform.system", return_value="Linux"):
+                self.assertEqual(ewf._posix_device_size(Dev()), 32_010_928_128)
+        self.assertEqual(calls, [0x40046418, 0x40086419, 0x80081272])
+
+    def test_restart_with_admin_rights_on_every_os(self):
+        """Restart as Administrator / root builds the right request for each OS and hands over the port."""
+        from unittest import mock
+        import elevation
+        with mock.patch.object(elevation, "SYSTEM", "Darwin"), mock.patch("subprocess.Popen") as popen:
+            res = elevation.relaunch(["--no-browser", "--port", "8000"], wait_for_port=True)
+        self.assertTrue(res["started"])
+        args = popen.call_args[0][0]
+        self.assertEqual(args[:2], ["osascript", "-e"])
+        self.assertIn("with administrator privileges", args[2])
+        self.assertIn("--replace", args[2])
+        with mock.patch.object(elevation, "SYSTEM", "Linux"), mock.patch("shutil.which", return_value="/usr/bin/pkexec"), \
+                mock.patch("subprocess.Popen") as popen:
+            self.assertTrue(elevation.relaunch(["--port", "8000"], wait_for_port=True)["started"])
+        args = popen.call_args[0][0]
+        self.assertEqual(args[0], "pkexec")
+        self.assertIn("--replace", args)
+        with mock.patch.object(elevation, "SYSTEM", "Linux"), mock.patch("shutil.which", return_value=None):
+            self.assertFalse(elevation.relaunch(["--port", "8000"])["started"])      # no GUI prompt: says use sudo
+        self.assertTrue(elevation.takeover_marker(8000).endswith("wipex-takeover-8000"))
+
     def test_nvme_identify_parsing(self):
         data = bytearray(4096)
         data[4:24] = b"SERIAL123".ljust(20)

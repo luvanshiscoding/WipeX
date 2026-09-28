@@ -710,8 +710,10 @@ class WipeEngine:
             model = (dev.get("model") or "Unknown Drive").strip() or "Unknown Drive"
             serial = dev.get("serial") or ""
             transport = dev.get("tran") or "sata"
-            hotplug = dev.get("hotplug", False)
-            rotational = dev.get("rota", True)
+            # lsblk before util-linux 2.33 prints booleans as "0" / "1" strings ("0" would count as true)
+            flag = lambda v: v is True or v == 1 or str(v).strip().lower() in ("1", "true")  # noqa: E731
+            hotplug = flag(dev.get("hotplug")) or transport in ("usb", "mmc")
+            rotational = flag(dev.get("rota", True))
 
             # Gather child partitions / mount points for this disk
             child_mounts = []

@@ -80,6 +80,10 @@ def takeover_marker(port: int) -> str:
     return os.path.join(folder, f"wipex-takeover-{port}")
 
 
+def _xml(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _sh(s: str) -> str:
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
@@ -108,9 +112,15 @@ def _task_xml(port: int) -> str:
 """
 
 
+def _user_home() -> str:
+    """Home of the person at the keyboard, also when WipeX runs through sudo (then HOME may be root's)."""
+    user = os.environ.get("SUDO_USER")
+    return os.path.expanduser(f"~{user}") if user and SYSTEM != "Windows" else os.path.expanduser("~")
+
+
 def _shortcut(port: int) -> str:
     """A desktop link to WipeX (the way users open it after the install)."""
-    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+    desktop = os.path.join(_user_home(), "Desktop")
     if not os.path.isdir(desktop):
         return ""
     if SYSTEM == "Darwin":
@@ -123,6 +133,10 @@ def _shortcut(port: int) -> str:
                 f"[Desktop Entry]\nType=Link\nName=WipeX\nURL=http://127.0.0.1:{port}/\n")
     with open(path, "w", encoding="utf-8") as f:
         f.write(body)
+    if SYSTEM == "Linux":
+        os.chmod(path, 0o755)                          # desktop launchers must be executable
+    if os.environ.get("SUDO_UID") and hasattr(os, "chown"):
+        os.chown(path, int(os.environ["SUDO_UID"]), int(os.environ.get("SUDO_GID", "-1")))   # not owned by root
     return path
 
 
@@ -145,8 +159,8 @@ def install(port: int = 8000) -> Dict[str, Any]:
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>in.wipex.engine</string>
-  <key>ProgramArguments</key><array><string>{_python()}</string><string>{LAUNCHER}</string><string>--no-browser</string><string>--no-admin</string><string>--port</string><string>{port}</string></array>
-  <key>WorkingDirectory</key><string>{ROOT}</string>
+  <key>ProgramArguments</key><array><string>{_xml(_python())}</string><string>{_xml(LAUNCHER)}</string><string>--no-browser</string><string>--no-admin</string><string>--port</string><string>{port}</string></array>
+  <key>WorkingDirectory</key><string>{_xml(ROOT)}</string>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/tmp/wipex-engine.log</string><key>StandardErrorPath</key><string>/tmp/wipex-engine.log</string>
 </dict></plist>
@@ -162,7 +176,7 @@ After=local-fs.target
 
 [Service]
 WorkingDirectory={ROOT}
-ExecStart={_python()} {LAUNCHER} --no-browser --no-admin --port {port}
+ExecStart="{_python()}" "{LAUNCHER}" --no-browser --no-admin --port {port}
 Restart=on-failure
 
 [Install]

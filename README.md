@@ -19,7 +19,7 @@ WipeX is one offline workstation application with the three modules SIH26149 ask
 | File deletion | FAT32 normal delete: 10 names and 8 files recoverable → after WipeX: **nothing** (checked by reading the drive directly) |
 | Safety | System disk always refused · legal holds · two-person rule · links and junctions never followed · demo mode that cannot touch a real drive |
 | Runs on | Windows 10/11, Linux, macOS · **no network needed** (automated test blocks every connection) |
-| Quality | 53 automated tests on Windows, Linux and macOS (GitHub Actions) |
+| Quality | 56 automated tests on Windows, Linux and macOS (GitHub Actions) |
 
 ---
 
@@ -54,7 +54,7 @@ npm install && npm run build        # builds the UI into dist/ (fonts bundled, n
 python wipex.py                     # opens WipeX on http://127.0.0.1:8000  (--window: own desktop window)
 ```
 
-Reading and erasing drives needs Administrator rights (Windows) or root (macOS, Linux), so WipeX **asks once when it starts**: the UAC prompt on Windows, the password in a terminal elsewhere. Double-clicking **`WipeX.cmd`** (Windows) or **`WipeX.command`** (macOS) does the same. If WipeX runs without them, a red bar offers **Restart as Administrator**; the page reconnects by itself.
+Reading and erasing drives needs Administrator rights (Windows) or root (macOS, Linux), so WipeX **asks once when it starts**: the UAC prompt on Windows, the password in a terminal elsewhere. Double-clicking **`WipeX.cmd`** (Windows) or **`WipeX.command`** (macOS), or running **`./WipeX.sh`** (Linux), does the same. If WipeX runs without them, a red bar offers **Restart as Administrator** (Windows UAC, the macOS password dialog, or the Linux system password dialog); the page reconnects by itself.
 
 **Open WipeX from a link, with no prompt.** Run once with the rights: `python wipex.py --install` (Windows: approve the prompt; macOS / Linux: `sudo python3 wipex.py --install`), or switch it on in *Settings*. WipeX then starts with the rights at every Windows sign-in (scheduled task "run with highest privileges") or at boot (macOS LaunchDaemon, Linux systemd), and users open **http://127.0.0.1:8000/** from a bookmark or the desktop shortcut. `--uninstall` removes it.
 
@@ -157,8 +157,10 @@ Design details: [docs/SPECIFICATION.md](docs/SPECIFICATION.md) · desktop packag
 | File erasure with streams / xattrs and OS traces | ✅ | ✅ | ✅ |
 | Drive check after file erasure | ✅ NTFS, FAT32, exFAT | ✅ ext4, FAT32, exFAT, NTFS | 🟡 HFS+, FAT, exFAT |
 | Recovery (Sleuth Kit + carving + E01) from USB drives | ✅ by drive letter | ✅ lsblk | ✅ diskutil (APFS cannot be read directly) |
+| Recovery from a whole USB drive (no letter, erased, formatted or damaged) | ✅ | ✅ `/dev/sdX` | ✅ `/dev/rdiskN` |
+| Admin rights asked once · start with them automatically | ✅ UAC · scheduled task | ✅ sudo / pkexec · systemd | ✅ sudo / password dialog · LaunchDaemon |
 | Format for reuse | exFAT, FAT32, NTFS | exFAT, FAT32, NTFS | exFAT, FAT32 |
-| Launcher · network needed | `WipeX.cmd` · none | `sudo python3 wipex.py` · none | `WipeX.command` · none |
+| Launcher · network needed | `WipeX.cmd` · none | `./WipeX.sh` · none | `WipeX.command` · none |
 
 ✅ implemented and tested · 🟡 implemented, awaiting validation on sacrificial hardware · — not offered (WipeX explains why). The test suite passes on Windows 11 and Ubuntu, and in GitHub Actions on Windows, Ubuntu and macOS. It has not yet been run on a physical Mac. Every firmware purge is followed by the same independent read-back, so a purge that silently did nothing fails verification.
 
