@@ -329,6 +329,29 @@ export async function askOperator() {
 
 export async function requireOperator() { return getOperator(); }
 
+// ── Administrator / root rights ─────────────────────────────────────────────
+/** Restart the engine with Administrator / root rights; the page reloads when the new engine answers. */
+export async function restartElevated() {
+  let res;
+  try { res = await api('/api/system/elevate', { method: 'POST' }); } catch (e) { reportError(e); return false; }
+  if (!res.started) { toast(res.message, res.elevated ? 'ok' : 'bad'); return !!res.elevated; }
+  const wait = modal({ title: 'Restarting WipeX with Administrator rights',
+    sub: esc(res.message), body: '<div class="job-msg"><span class="spinner"></span><span>Waiting for the engine…</span></div>',
+    actions: [{ label: 'Close', value: null }] });
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    await sleep(1500);
+    try {
+      const h = await fetch(API_BASE + '/api/health', { cache: 'no-store' }).then(r => r.json());
+      if (h.elevated) { location.reload(); return true; }
+    } catch { /* the engine is switching over */ }
+  }
+  document.querySelector('.modal-backdrop')?.remove();
+  await wait;
+  toast('WipeX is still running without Administrator rights', 'bad');
+  return false;
+}
+
 // ── File picker (the file browser in a dialog) ───────────────────────────────
 /** pick: 'any' | 'folder' | 'file'. Resolves to an array of paths, or null when cancelled. */
 export async function pickPaths({ title = 'Choose files or folders', start = '', pick = 'any', multi = false } = {}) {

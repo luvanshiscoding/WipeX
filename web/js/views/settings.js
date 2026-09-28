@@ -1,7 +1,7 @@
 /** Settings (administrator): access profiles, roles, two-person rule, workstation key. */
-import { api, badge, esc, icon, modal, reportError, session, toast, when } from '../core.js';
+import { api, badge, esc, icon, modal, reportError, restartElevated, session, toast, when } from '../core.js';
 
-const S = { users: [], roles: [], dual: false, key: '' };
+const S = { users: [], roles: [], dual: false, key: '', admin: null };
 let root;
 
 const ROLE_NOTES = {
@@ -18,9 +18,10 @@ export async function show(el) {
 
 async function refresh() {
   try {
-    const [users, roles, dual, key] = await Promise.all([
-      api('/api/users'), api('/api/roles'), api('/api/settings/dual-approval'), api('/api/crypto/public-key')]);
-    Object.assign(S, { users, roles, dual: dual.enabled, key: key.publicKeyPem });
+    const [users, roles, dual, key, admin] = await Promise.all([
+      api('/api/users'), api('/api/roles'), api('/api/settings/dual-approval'), api('/api/crypto/public-key'),
+      api('/api/system/admin').catch(() => null)]);
+    Object.assign(S, { users, roles, dual: dual.enabled, key: key.publicKeyPem, admin });
   } catch (e) { reportError(e); }
   render();
 }
@@ -66,6 +67,21 @@ function policyCard() {
     + `<div class="card-body">${toggle}</div></div>`;
 }
 
+function adminCard() {
+  const a = S.admin;
+  if (!a) return '';
+  const who = a.platform === 'Windows' ? 'Administrator' : 'root';
+  const startsWhen = a.platform === 'Windows' ? 'every time you sign in to Windows' : 'when the computer starts';
+  return `<div class="card"><div class="card-head"><span class="card-title">${who} rights</span>`
+    + `${a.elevated ? badge('Running with them', 'ok') : badge('Not running with them', 'bad')}</div>`
+    + `<div class="card-body stack" style="gap:12px">`
+    + (a.elevated ? '' : `<button class="btn btn-danger btn-sm" id="st-elevate" style="align-self:flex-start">${icon('shield', 14)} Restart as ${who}</button>`)
+    + `<label class="toggle"><input type="checkbox" id="st-auto" ${a.autostart ? 'checked' : ''} ${a.elevated ? '' : 'disabled'}>`
+    + `<span>Start WipeX with ${who} rights automatically<span class="hint">WipeX then starts ${startsWhen} with no prompt, and you open it from the link `
+    + `<span class="mono">${esc(location.origin)}/</span> (a desktop shortcut is added). ${a.elevated ? '' : `Needs WipeX running with ${who} rights to switch.`}</span></span></label>`
+    + `</div></div>`;
+}
+
 function keyCard() {
   return `<div class="card"><div class="card-head"><span class="card-title">Workstation signing key</span>`
     + `<span class="card-sub">ECDSA P-256; verifies certificates and the audit log</span></div>`
@@ -75,7 +91,15 @@ function keyCard() {
 function render() {
   root.innerHTML = headHtml()
     + `<div class="grid cols-side"><div class="stack">${usersCard()}</div>`
-    + `<div class="stack">${policyCard()}${rolesCard()}${keyCard()}</div></div>`;
+    + `<div class="stack">${adminCard()}${policyCard()}${rolesCard()}${keyCard()}</div></div>`;
+  root.querySelector('#st-elevate')?.addEventListener('click', () => restartElevated());
+  root.querySelector('#st-auto')?.addEventListener('change', async (e) => {
+    try {
+      const r = await api('/api/system/autostart', { method: 'POST', body: { enabled: e.target.checked } });
+      toast(r.installed ? `WipeX ${r.how}. Open it at ${r.link}` : 'Automatic start removed', 'ok');
+      S.admin.autostart = !!r.installed;
+    } catch (err) { reportError(err); e.target.checked = !e.target.checked; }
+  });
   root.querySelector('#st-dual').addEventListener('change', async (e) => {
     try {
       await api('/api/settings/dual-approval', { method: 'POST', body: { enabled: e.target.checked } });

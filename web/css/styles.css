@@ -661,3 +661,15 @@ details.more.card-like > .more-body { padding-top: 4px; }
   .xp-search { width: 100%; order: 3; }
   .brand-tag { display: none; }
 }
+
+/* ─── Administrator rights bar ───────────────────────────────────────── */
+
+.admin-bar { position: sticky; top: var(--top-h); z-index: 46; display: flex; align-items: center; gap: 10px; padding: 8px 28px; flex-wrap: wrap;
+  background: var(--bad-soft); border-bottom: 1px solid var(--bad-line); font-size: 13px; color: #7d1d17; }
+.admin-bar[hidden] { display: none; }
+.admin-bar > svg { color: var(--bad); flex-shrink: 0; }
+.btn.admin-go { background: var(--bad); color: #fff; }
+.btn.admin-go:hover:not(:disabled) { background: #92201a; }
+@media (max-width: 900px) { .admin-bar { padding-left: 16px; padding-right: 16px; } }
+.src-sec { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 16px 0 8px; }
+.src-sec:first-child { margin-top: 0; }

@@ -19,7 +19,7 @@ WipeX is one offline workstation application with the three modules SIH26149 ask
 | File deletion | FAT32 normal delete: 10 names and 8 files recoverable → after WipeX: **nothing** (checked by reading the drive directly) |
 | Safety | System disk always refused · legal holds · two-person rule · links and junctions never followed · demo mode that cannot touch a real drive |
 | Runs on | Windows 10/11, Linux, macOS · **no network needed** (automated test blocks every connection) |
-| Quality | 52 automated tests on Windows, Linux and macOS (GitHub Actions) |
+| Quality | 53 automated tests on Windows, Linux and macOS (GitHub Actions) |
 
 ---
 
@@ -54,7 +54,9 @@ npm install && npm run build        # builds the UI into dist/ (fonts bundled, n
 python wipex.py                     # opens WipeX on http://127.0.0.1:8000  (--window: own desktop window)
 ```
 
-Or double-click **`WipeX.cmd`** (Windows, asks for Administrator) or **`WipeX.command`** (macOS, asks for your password). On Linux, run `sudo python3 wipex.py`. Administrator or root rights are needed only to read and erase drives directly.
+Reading and erasing drives needs Administrator rights (Windows) or root (macOS, Linux), so WipeX **asks once when it starts**: the UAC prompt on Windows, the password in a terminal elsewhere. Double-clicking **`WipeX.cmd`** (Windows) or **`WipeX.command`** (macOS) does the same. If WipeX runs without them, a red bar offers **Restart as Administrator**; the page reconnects by itself.
+
+**Open WipeX from a link, with no prompt.** Run once with the rights: `python wipex.py --install` (Windows: approve the prompt; macOS / Linux: `sudo python3 wipex.py --install`), or switch it on in *Settings*. WipeX then starts with the rights at every Windows sign-in (scheduled task "run with highest privileges") or at boot (macOS LaunchDaemon, Linux systemd), and users open **http://127.0.0.1:8000/** from a bookmark or the desktop shortcut. `--uninstall` removes it.
 
 WipeX opens straight into the **NTRO Lab Administrator** profile; there is no sign-in page for evaluators. *View as* (top right) switches to the Forensic Investigator, Sanitization Officer or Auditor profile, and the menu then shows only what that role may do.
 
@@ -78,7 +80,7 @@ WipeX opens straight into the **NTRO Lab Administrator** profile; there is no si
 | 5 | **Erase → Whole drive** → the stick → *NIST 800-88 Clear* (recommended) | Verified → signed certificate → *Format for reuse* |
 | 6 | **Verify Certificate** · **Audit Log** | Certificate authentic · chain intact |
 
-Explorer or an antivirus scan holding the stick open is handled: WipeX dismounts the volume and then locks it.
+Explorer or an antivirus scan holding the stick open is handled: WipeX dismounts the volume and then locks it. A stick with no drive letter (erased, formatted, or with a damaged file system) is listed under *Whole USB drives* in Recover Files and read block by block; press **Rescan** after plugging one in.
 
 ## 4. Screenshots
 

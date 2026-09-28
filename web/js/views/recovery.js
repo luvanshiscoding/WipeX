@@ -1,9 +1,9 @@
 /** Recover deleted files: choose where to look, scan, review what can be recovered. */
-import { api, apiUrl, badge, bytes, demo, esc, icon, pickPaths, progressBlock, refreshDemo, reportError, short, statusBadge,
-  toast, waitForJob, when } from '../core.js';
+import { api, apiUrl, badge, bytes, demo, esc, icon, pickPaths, progressBlock, refreshDemo, reportError, restartElevated, short,
+  statusBadge, toast, waitForJob, when } from '../core.js';
 
 const S = {
-  kind: 'drive', drive: '', folder: '', labId: '', evidenceId: '', path: '', deep: false,
+  kind: 'drive', drive: '', disk: '', folder: '', labId: '', evidenceId: '', path: '', deep: false,
   types: [], partial: false, sources: null, formats: [], job: null, history: [], bench: null, benchImage: '',
 };
 let root;
@@ -16,19 +16,53 @@ export async function show(el, params) {
     api('/api/recovery/sources').catch(() => ({ drives: [], labImages: [], evidence: [] })),
     api('/api/recovery/formats').catch(() => []), api('/api/jobs?kind=recovery').catch(() => []),
   ]);
-  S.sources = sources;
+  S.sources = { ...sources, disks: S.sources?.disks ?? null };
   S.formats = formats;
   S.history = history;
   const imgs = sources.labImages || [];
   S.labId = S.labId || imgs.find(i => i.hasTruth)?.id || imgs[0]?.id || '';
   S.benchImage = S.benchImage || imgs.find(i => i.hasTruth)?.id || '';
   S.evidenceId = S.evidenceId || sources.evidence?.[0]?.id || '';
-  if (!S.drive) S.drive = (sources.drives || []).find(d => d.removable)?.id || '';
-  if (!(sources.drives || []).length && S.kind === 'drive') S.kind = 'path';
+  pickDefault();
   render();
+  loadDisks(false);
+}
+
+/** Whole USB drives come from the physical-disk probe (seconds): the page shows first, the list follows. */
+async function loadDisks(refresh) {
+  const disks = await api(`/api/recovery/disks${refresh ? '?refresh=true' : ''}`).catch(() => []);
+  if (!S.sources) return;
+  S.sources.disks = disks;
+  pickDefault();
+  if (root?.isConnected && root.classList.contains('active') && S.job?.status !== 'RUNNING') render();
 }
 
 const KINDS = [['drive', 'Drive / USB'], ['evidence', 'Case evidence'], ['path', 'Image file']];
+
+/** Keep the chosen drive if it is still there, else pick the first USB volume, else the first whole USB drive. */
+function pickDefault() {
+  const src = S.sources || {};
+  if (S.drive && !(src.drives || []).some(d => d.id === S.drive)) S.drive = '';
+  if (S.disk && !(src.disks || []).some(d => d.id === S.disk)) S.disk = '';
+  if (!S.drive && !S.disk) {
+    S.drive = (src.drives || []).find(d => d.removable)?.id || '';
+    if (!S.drive) S.disk = (src.disks || [])[0]?.id || '';
+  }
+}
+
+async function rescan() {
+  S.rescanning = true;
+  render();
+  try {
+    const [sources, disks] = await Promise.all([api('/api/recovery/sources'), api('/api/recovery/disks?refresh=true')]);
+    S.sources = { ...sources, disks };
+    pickDefault();
+    const n = (S.sources.disks || []).length + (S.sources.drives || []).filter(d => d.removable).length;
+    toast(n ? 'Drives rescanned' : 'No USB drive found: check the stick is plugged in and shows in the file manager', n ? 'ok' : 'bad');
+  } catch (e) { reportError(e); }
+  S.rescanning = false;
+  render();
+}
 
 function render() {
   const running = S.job?.status === 'RUNNING';
@@ -62,11 +96,20 @@ function render() {
   bind();
 }
 
+function diskCard(d) {
+  const letters = (d.mounts || []).map(m => m.replace(/\\$/, '')).join(', ');
+  return `<button class="pick ${S.disk === d.id ? 'on' : ''}" data-disk="${esc(d.id)}">
+    <div class="pick-top"><span class="pick-title">${esc(d.model)}</span><span class="pick-tags">${badge('Whole drive', 'blue')}</span></div>
+    <div class="pick-meta"><span>${letters ? `Volumes ${esc(letters)}` : 'No drive letter or readable file system'}</span><b>${bytes(d.size)}</b></div>
+    <div class="pick-note">Every block is read, also after an erase, a format or file-system damage</div>
+  </button>`;
+}
+
 function driveCard(d) {
   const tags = [d.removable ? badge('USB / removable', 'blue') : '', d.isSystem ? badge('System drive', 'warn') : '',
     d.mediaType === 'SSD' ? badge('SSD') : d.mediaType === 'HDD' ? badge('Hard disk') : ''].join('');
   const title = d.letter ? `${d.letter}: ${d.label || 'Local disk'}` : `${d.label || (d.removable ? 'USB drive' : 'Volume')} · ${d.id}`;
-  return `<button class="pick ${S.drive === d.id ? 'on' : ''}" data-drive="${esc(d.id)}">
+  return `<button class="pick ${S.drive === d.id && !S.disk ? 'on' : ''}" data-drive="${esc(d.id)}">
     <div class="pick-top"><span class="pick-title">${esc(title)}</span><span class="pick-tags">${tags}</span></div>
     <div class="pick-meta"><span>${esc(d.fileSystem)}</span><b>${bytes(d.size)}</b></div>
   </button>`;
@@ -76,14 +119,26 @@ function sourceBody() {
   const src = S.sources || {};
   if (S.kind === 'drive') {
     const drives = src.drives || [];
-    if (!drives.length) return `<div class="empty">No drive found. Plug in a USB drive and reopen this page${src.platform === 'Windows' ? '' : ' (APFS volumes cannot be read directly; use an image file)'}.</div>`;
-    const d = drives.find(x => x.id === S.drive);
+    const disks = src.disks || [];
+    const looking = src.disks == null;
+    const rescanBtn = `<button class="btn btn-secondary btn-sm" id="rc-rescan" ${S.rescanning ? 'disabled' : ''}>${icon('refresh', 14)} ${S.rescanning ? 'Scanning…' : 'Rescan'}</button>`;
+    const adminNote = src.elevated ? '' : `<div class="notice warn" style="margin-bottom:12px">${icon('alert', 16)}<div><strong>${src.platform === 'Windows' ? 'Administrator rights needed' : 'Root rights needed'}</strong>WipeX must run with them to read a drive directly.
+      <div style="margin-top:8px"><button class="btn btn-danger btn-sm" id="rc-elevate">${icon('shield', 14)} Restart as ${src.platform === 'Windows' ? 'Administrator' : 'root'}</button></div></div></div>`;
+    if (!drives.length && !disks.length && !looking) {
+      return `${adminNote}<div class="empty"><strong>No drive found</strong>Plug in the USB drive, wait until the computer shows it, then press Rescan${src.platform === 'Windows' ? '' : ' (APFS volumes cannot be read directly; use an image file)'}.
+        <div class="row">${rescanBtn}</div></div>`;
+    }
+    const d = S.disk ? null : drives.find(x => x.id === S.drive);
     const ssd = d && d.mediaType === 'SSD' && d.trim;
     const sorted = [...drives].sort((x, y) => (y.removable ? 1 : 0) - (x.removable ? 1 : 0));
     return `
-      ${src.elevated ? '' : `<div class="notice warn" style="margin-bottom:12px">${icon('alert', 16)}<div><strong>${src.platform === 'Windows' ? 'Administrator rights needed' : 'Root rights needed'}</strong>${src.platform === 'Windows' ? 'Start WipeX with WipeX.cmd to read drives directly.' : 'Start WipeX with sudo python3 wipex.py to read drives directly.'}</div></div>`}
-      <div class="pick-grid">${sorted.map(driveCard).join('')}</div>
-      ${drives.some(x => x.removable) ? '' : '<div class="muted small" style="margin-top:10px">No USB drive found: plug one in and reopen this page.</div>'}
+      ${adminNote}
+      <div class="src-sec"><span class="label">Drives by letter</span>${rescanBtn}</div>
+      ${drives.length ? `<div class="pick-grid">${sorted.map(driveCard).join('')}</div>` : '<div class="muted small">No drive letters.</div>'}
+      ${looking ? `<div class="muted small job-msg" style="margin-top:12px"><span class="spinner"></span><span>Looking for whole USB drives…</span></div>`
+        : disks.length ? `<div class="src-sec"><span class="label">Whole USB drives</span><span class="muted small">for a stick without a drive letter, after an erase or format, or with a damaged file system</span></div>
+        <div class="pick-grid">${disks.map(diskCard).join('')}</div>`
+        : `<div class="muted small" style="margin-top:10px">No USB drive found: plug one in and press Rescan.</div>`}
       ${d ? `<div class="field" style="margin-top:14px"><label for="rc-folder">Only look in this folder (optional)</label>
         <div class="row"><input class="input mono" id="rc-folder" value="${esc(S.folder)}" placeholder="${d.letter ? `${esc(d.letter)}:\\Photos` : esc((d.mount || '') + '/Photos')}" style="flex:1">
         <button class="btn btn-secondary btn-sm" id="rc-browse">Browse</button></div>
@@ -119,7 +174,7 @@ function sourceBody() {
 }
 
 function estimate() {
-  const d = (S.sources?.drives || []).find(x => x.id === S.drive);
+  const d = S.disk ? (S.sources?.disks || []).find(x => x.id === S.disk) : (S.sources?.drives || []).find(x => x.id === S.drive);
   if (S.kind !== 'drive' || !d || S.folder) return '';
   const min = Math.max(1, Math.round(d.size / (120 * 1e6) / 60));
   return `About ${min} min for this drive.`;
@@ -127,7 +182,10 @@ function estimate() {
 
 function bind() {
   root.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => { S.kind = b.dataset.kind; render(); }));
-  root.querySelectorAll('[data-drive]').forEach(b => b.addEventListener('click', () => { S.drive = b.dataset.drive; S.folder = ''; render(); }));
+  root.querySelectorAll('[data-drive]').forEach(b => b.addEventListener('click', () => { S.drive = b.dataset.drive; S.disk = ''; S.folder = ''; render(); }));
+  root.querySelectorAll('[data-disk]').forEach(b => b.addEventListener('click', () => { S.disk = b.dataset.disk; S.folder = ''; S.deep = true; render(); }));
+  root.querySelector('#rc-rescan')?.addEventListener('click', rescan);
+  root.querySelector('#rc-elevate')?.addEventListener('click', async (e) => { e.target.disabled = true; await restartElevated(); e.target.disabled = false; });
   root.querySelector('#rc-folder')?.addEventListener('input', e => { S.folder = e.target.value; });
   root.querySelector('#rc-browse')?.addEventListener('click', async () => {
     const dv = (S.sources?.drives || []).find(x => x.id === S.drive) || {};
@@ -170,6 +228,7 @@ async function labAction(action, done) {
 }
 
 function currentSource() {
+  if (S.kind === 'drive' && S.disk) return { type: 'disk', id: S.disk };
   if (S.kind === 'drive') return S.drive ? { type: 'drive', id: S.drive, folder: S.folder.trim() || null } : null;
   if (S.kind === 'lab') return S.labId ? { type: 'lab', id: S.labId } : null;
   if (S.kind === 'evidence') return S.evidenceId ? { type: 'evidence', id: S.evidenceId } : null;
@@ -180,7 +239,7 @@ async function start() {
   const source = currentSource();
   if (!source) { toast('Choose where to look first', 'bad'); return; }
   // Sample disks and image files are small: always search their blocks too
-  const deep = S.deep || S.kind === 'lab' || S.kind === 'path' || S.kind === 'evidence';
+  const deep = S.deep || S.kind === 'lab' || S.kind === 'path' || S.kind === 'evidence' || (S.kind === 'drive' && !!S.disk);
   try {
     const { jobId } = await api('/api/recovery/scan', { method: 'POST', body: {
       source, useFs: true, useCarving: deep, types: S.types.length ? S.types : null, includePartial: S.partial } });

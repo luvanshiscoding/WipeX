@@ -218,6 +218,34 @@ class Api(unittest.TestCase):
         self.assertEqual(img["advice"]["recommended"], img["recommendedMethod"])
         self.assertEqual(img["advice"]["mediaClass"], "image")
 
+    def test_whole_usb_drive_without_a_drive_letter_can_be_scanned(self):
+        """Recover Files lists whole USB drives (a stick erased, formatted or damaged has no usable letter)
+        and reads them raw; the system disk and fixed disks are not offered."""
+        from unittest import mock
+        import main
+        img = os.path.join(lab_images.images_dir(), "usbstick.img")
+        lab_images.build_sample_image(img, size_mb=24)
+        fake = [{"id": "dev-disk-7", "devicePath": img, "model": "SanDisk Cruzer (test)", "capacityBytes": os.path.getsize(img),
+                 "removable": True, "isBootDrive": False, "mountedPaths": [], "type": "USB / removable"},
+                {"id": "dev-disk-0", "devicePath": "\\\\.\\PhysicalDrive0", "model": "System NVMe", "capacityBytes": 1,
+                 "removable": False, "isBootDrive": True, "mountedPaths": ["C:\\"]}]
+        with mock.patch.object(main, "_physical_devices", return_value=fake), mock.patch.object(main, "_is_admin", return_value=True):
+            disks = self.c.get("/api/recovery/disks?refresh=true", headers=self.admin).json()
+            self.assertEqual([d["id"] for d in disks], ["dev-disk-7"])
+            r = self.c.post("/api/recovery/scan", json={"source": {"type": "disk", "id": "dev-disk-7"}, "useFs": True, "useCarving": True},
+                            headers=self.admin)
+            self.assertEqual(r.status_code, 200, r.text)
+            for _ in range(240):
+                job = self.c.get(f"/api/jobs/{r.json()['jobId']}", headers=self.admin).json()
+                if job["status"] != "RUNNING":
+                    break
+                time.sleep(0.5)
+            self.assertEqual(job["status"], "COMPLETED", job.get("message"))
+            self.assertGreaterEqual(len(job["result"]["carving"]["files"]), 10)
+            r = self.c.post("/api/recovery/scan", json={"source": {"type": "disk", "id": "dev-disk-0"}}, headers=self.admin)
+            self.assertEqual(r.status_code, 404, r.text)                     # the system disk is not a recovery source here
+        os.remove(img)
+
 
 
 class WorksOffline(unittest.TestCase):

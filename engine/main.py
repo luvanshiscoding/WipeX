@@ -37,6 +37,7 @@ import benchmark
 import cases
 import database
 import demo
+import elevation
 import erasure
 import ewf
 import file_eraser
@@ -535,6 +536,53 @@ def delete_lab_image(image_id: str, sess=Depends(need("lab.manage"))):
     return {"deleted": image_id}
 
 
+# ── Administrator / root rights ──────────────────────────────────────────────
+
+@app.get("/api/system/admin")
+def admin_state(sess=Depends(signed_in)):
+    return {"elevated": _is_admin(), "autostart": elevation.installed(), "platform": platform.system()}
+
+
+@app.post("/api/system/elevate")
+def restart_elevated(request: Request, sess=Depends(signed_in)):
+    """Restart this engine with Administrator / root rights. The new engine takes over the same port,
+    so the open page reconnects to it; this one exits once the new one has started."""
+    if _is_admin():
+        return {"started": False, "elevated": True, "message": "WipeX already runs with Administrator / root rights"}
+    port = request.url.port or 8000
+    marker = elevation.takeover_marker(port)
+    if os.path.exists(marker):
+        os.remove(marker)
+    res = elevation.relaunch(["--no-browser", "--port", str(port)], wait_for_port=True)
+    if res["started"]:
+        audit_log.append("system.restart_elevated", sess["username"])
+
+        def hand_over():                                   # exit when the elevated engine is up (or give up)
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                if os.path.exists(marker):
+                    time.sleep(0.5)
+                    os._exit(0)
+                time.sleep(0.5)
+        threading.Thread(target=hand_over, daemon=True).start()
+    return res
+
+
+class AutostartRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/system/autostart")
+def set_autostart(req: AutostartRequest, request: Request, sess=Depends(need("users.manage"))):
+    """Start WipeX with Administrator / root rights automatically (sign-in on Windows, boot on macOS / Linux)."""
+    try:
+        res = elevation.install(request.url.port or 8000) if req.enabled else elevation.uninstall()
+    except Exception as exc:  # noqa: BLE001
+        _fail(exc)
+    audit_log.append("system.autostart", sess["username"], details={"enabled": req.enabled})
+    return res
+
+
 # ── Recovery (M3) ────────────────────────────────────────────────────────────
 
 class RecoverySource(BaseModel):
@@ -657,9 +705,30 @@ def _unix_drives() -> List[Dict[str, Any]]:
     return drives
 
 
+def _usb_disks(refresh: bool = False) -> List[Dict[str, Any]]:
+    """Whole USB drives and memory cards, read raw: this also reaches a stick with no drive letter, no
+    partition (e.g. after a whole-drive erase) or a damaged file system, which the volume list misses."""
+    disks = []
+    for d in _physical_devices(refresh):
+        if not d.get("removable") or d.get("isBootDrive") or d.get("isImage") or not d.get("devicePath"):
+            continue
+        dev = d["devicePath"]
+        if platform.system() == "Darwin" and dev.startswith("/dev/disk"):
+            dev = "/dev/r" + dev[5:]                       # raw node: much faster sequential reads
+        disks.append({"id": d["id"], "device": dev, "model": d.get("model") or "USB drive", "size": d.get("capacityBytes") or 0,
+                      "mounts": d.get("mountedPaths") or [], "type": d.get("type") or ""})
+    return disks
+
+
+@app.get("/api/recovery/disks")
+def recovery_disks(refresh: bool = False, sess=Depends(need("recovery.run"))):
+    """Whole USB drives (a few seconds on the first call: it probes the physical disks)."""
+    return _usb_disks(refresh)
+
+
 @app.get("/api/recovery/sources")
 def recovery_sources(sess=Depends(need("recovery.run"))):
-    """Drives (Windows volumes), lab images and acquired evidence that can be scanned."""
+    """Drives (volumes with a letter / mount point), lab images and acquired evidence (fast)."""
     evidence = [e for c in cases.list_cases() for e in (cases.get_case(c["id"]) or {}).get("evidence", [])]
     return {"drives": _windows_drives() if platform.system() == "Windows" else _unix_drives(),
             "labImages": lab_images.list_images(with_files=False),
@@ -669,6 +738,14 @@ def recovery_sources(sess=Depends(need("recovery.run"))):
 
 
 def _resolve_source(src: RecoverySource) -> Dict[str, Any]:
+    if src.type == "disk":
+        disk = next((d for d in _usb_disks() if d["id"] == src.id), None) or \
+            next((d for d in _usb_disks(refresh=True) if d["id"] == src.id), None)
+        if not disk:
+            raise LookupError("USB drive not found: plug it in and press Rescan")
+        if not _is_admin():
+            raise PermissionError("Reading a whole drive needs Administrator / root rights: use Restart as Administrator")
+        return {"path": disk["device"], "label": f"{disk['model']} (whole drive)"}
     if src.type == "drive" and platform.system() != "Windows":
         drive = next((d for d in _unix_drives() if d["id"] == src.id), None)
         if not drive:

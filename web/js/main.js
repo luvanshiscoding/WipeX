@@ -9,7 +9,7 @@ import '@fontsource/ibm-plex-sans/700.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import { api, askOperator, can, demo, esc, icon, loadProfiles, nextDemoStep, onDemoChange, onSessionEnded, openProfile,
-  profiles, refreshDemo, renderOperator, reportError, session, setDemo, setSession, toast } from './core.js';
+  profiles, refreshDemo, renderOperator, reportError, restartElevated, session, setDemo, setSession, toast } from './core.js';
 import logoUrl from '../img/wipex-logo.svg';
 import * as overview from './views/overview.js';
 import * as erase from './views/erase.js';
@@ -132,7 +132,19 @@ async function boot() {
   document.getElementById('auth-root').innerHTML = '';
   document.body.classList.remove('signed-out');
   await refreshDemo();
+  renderAdminBar();
   route();
+}
+
+function renderAdminBar() {
+  const bar = document.getElementById('admin-bar');
+  const h = app.health;
+  if (!h || h.elevated || !session.user) { bar.hidden = true; return; }
+  const who = h.platform === 'Windows' ? 'Administrator' : 'root';
+  bar.hidden = false;
+  bar.innerHTML = `${icon('lock', 15)}<span><b>No ${who} rights.</b> USB drives and disks cannot be read or erased directly until WipeX runs with them.</span>
+    <span class="spacer"></span><button class="btn btn-sm admin-go" id="admin-go">${icon('shield', 14)} Restart as ${who}</button>`;
+  bar.querySelector('#admin-go').addEventListener('click', async (e) => { e.target.disabled = true; await restartElevated(); e.target.disabled = false; });
 }
 
 async function refreshHealth() {
@@ -141,6 +153,7 @@ async function refreshHealth() {
     app.health = await api('/api/health');
     el.innerHTML = `<span class="dot ok"></span><span class="engine-text">Engine online${app.health.elevated ? ' · Admin' : ''}</span>`;
     el.title = `WipeX engine running on ${app.health.platform}${app.health.elevated ? ' as Administrator (drives can be read directly)' : ' without Administrator rights (drives cannot be read directly)'}`;
+    renderAdminBar();
   } catch {
     app.health = null;
     el.innerHTML = '<span class="dot bad"></span><span class="engine-text">Engine offline</span>';
