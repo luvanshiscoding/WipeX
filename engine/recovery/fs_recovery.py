@@ -109,6 +109,94 @@ def available() -> bool:
     return HAS_TSK
 
 
+def _metadata_span(img, offset: int, fs) -> int:
+    """Bytes from the start of a file system to its data area: boot sector, FATs and (FAT12/16) root
+    directory, or exFAT's region before the cluster heap. NTFS keeps all metadata in files ($MFT...),
+    which the walk collects, so only its boot sectors are added here."""
+    try:
+        boot = img.read(offset, 512)
+    except IOError:
+        boot = b""
+    if len(boot) == 512 and boot[3:11] == b"EXFAT   ":
+        return struct.unpack_from("<I", boot, 88)[0] << boot[108]            # cluster heap offset x sector size
+    if len(boot) == 512 and boot[3:7] == b"NTFS":
+        return 16 * 512
+    if len(boot) == 512 and boot[510:512] == b"\x55\xAA":
+        bps, reserved, nfats, root_entries = (struct.unpack_from("<H", boot, 11)[0], struct.unpack_from("<H", boot, 14)[0],
+                                              boot[16], struct.unpack_from("<H", boot, 17)[0])
+        fat_sectors = struct.unpack_from("<H", boot, 22)[0] or struct.unpack_from("<I", boot, 36)[0]
+        if bps in (512, 1024, 2048, 4096) and nfats:
+            return (reserved + nfats * fat_sectors) * bps + root_entries * 32
+    return 32 * 1024 * 1024                                                  # unknown layout: the first 32 MiB
+
+
+def used_extents(source_path: str, max_entries: int = 200000) -> Dict[str, object]:
+    """Every byte range the file systems on a drive use or used: file-system tables, directories, the data of
+    live files and of deleted files the file system still describes, and system files ($MFT, bitmaps...).
+    Quick erase overwrites exactly these. Returns {"extents": [(offset, length)], "volumes", "files", "complete"}."""
+    if not HAS_TSK:
+        raise RuntimeError("The Sleuth Kit (pytsk3) is needed to map the file system")
+    img = _open_img(source_path)
+    extents: List[Tuple[int, int]] = []
+    volumes: List[Dict[str, object]] = []
+    count = 0
+    complete = True
+    try:
+        for vol in _open_filesystems(img):
+            fs, base = vol["fs"], int(vol["offset"])
+            bs = int(fs.info.block_size)
+            extents.append((base, _metadata_span(img, base, fs)))
+            last = int(fs.info.last_block)
+            extents.append((base + last * bs, bs))                           # NTFS backup boot sector, FAT32 tail
+            volumes.append({"offset": base, "fsType": _fs_name(fs.info.ftype), "blockSize": bs})
+            seen: set = set()
+
+            def runs(entry):
+                for attr in entry:
+                    if not int(attr.info.flags) & int(pytsk3.TSK_FS_ATTR_NONRES):
+                        continue                                             # resident: inside $MFT, mapped with it
+                    for run in attr:                                 # skip sparse runs and fillers (no disk location)
+                        if int(run.len) > 0 and not int(run.flags) & (int(pytsk3.TSK_FS_ATTR_RUN_FLAG_SPARSE)
+                                                                      | int(pytsk3.TSK_FS_ATTR_RUN_FLAG_FILLER)):
+                            extents.append((base + int(run.addr) * bs, int(run.len) * bs))
+
+            def walk(directory, depth: int):
+                nonlocal count, complete
+                for entry in directory:
+                    if count >= max_entries:
+                        complete = False
+                        return
+                    name = entry.info.name.name
+                    if name in (b".", b".."):
+                        continue
+                    meta = entry.info.meta
+                    if meta is None:
+                        continue
+                    count += 1
+                    try:
+                        runs(entry)
+                    except IOError:
+                        pass
+                    key = int(meta.addr)
+                    if int(meta.type) == int(pytsk3.TSK_FS_META_TYPE_DIR) and key not in seen and depth < 64:
+                        seen.add(key)
+                        try:
+                            walk(entry.as_directory(), depth + 1)
+                        except IOError:
+                            pass
+
+            try:
+                walk(fs.open_dir(path="/"), 0)
+            except IOError:
+                complete = False
+    finally:
+        try:
+            img.close()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"extents": extents, "volumes": volumes, "files": count, "complete": complete}
+
+
 def scan(source_path: str, out_dir: Optional[str] = None, extract_deleted: bool = True,
          progress: Optional[ProgressFn] = None, max_entries: int = 50000, hash_live: bool = True,
          start_path: str = "") -> Dict[str, object]:

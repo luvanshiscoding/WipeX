@@ -220,6 +220,7 @@ const FIT = { best: ['Recommended', 'ok'], good: ['Suitable', 'info'], fair: ['W
 const FIT_ORDER = ['best', 'good', 'fair', 'avoid', 'unavailable'];
 
 const METHOD_NOTES = {
+  quick_used: 'Overwrites only what the file system uses or used, then checks the rest for old data. Seconds; not a NIST Clear.',
   nist_800_88: 'One pass of zeros over every addressable sector, then a full read-back. The NIST baseline for Clear.',
   single_pass: 'One pass of zeros. Same write as NIST Clear; kept for policies that name it separately.',
   random_pass: 'One pass of keyed random data. Verification regenerates the exact stream, so random is fully checkable.',
@@ -241,7 +242,8 @@ function methodRow(m, d, advice) {
       <div class="method-name">${esc(m.name)}</div>
       <div class="method-why">${esc(blocked || advice.reason || METHOD_NOTES[m.id] || '')}</div>
     </div>
-    <div class="method-tags">${badge(label, tone)}<span class="muted small">${m.passes ? `${m.passes} pass${m.passes > 1 ? 'es' : ''}` : 'Firmware'} · NIST ${esc(m.category)}</span>
+    <div class="method-tags">${badge(label, tone)}<span class="muted small">${m.id === 'quick_used' ? 'Used space only · not a NIST Clear'
+      : `${m.passes ? `${m.passes} pass${m.passes > 1 ? 'es' : ''}` : 'Firmware'} · NIST ${esc(m.category)}`}</span>
       ${advice.time && !off ? `<span class="method-time">${esc(advice.time)}</span>` : ''}</div>
   </label>`;
 }
@@ -266,6 +268,10 @@ function renderMethods(body) {
             ${S.method !== rec ? '<button class="btn btn-secondary btn-sm" id="mt-use-rec">Use it</button>' : badge('Selected', 'ok')}</div>
           <ul class="rec-why">${(adv.why || []).map(w => `<li>${esc(w)}</li>`).join('')}</ul>
           ${adv.methods?.[rec]?.time ? `<div class="rec-time">${icon('info', 14)} Takes ${esc(adv.methods[rec].time)} for this drive. ${esc(adv.timeNote || '')}</div>` : ''}
+          ${adv.fastest && adv.methods?.[adv.fastest] && S.method !== adv.fastest ? `<div class="quick-offer">
+            <div><b>Need it in seconds?</b> Quick erase overwrites only what the file system uses or used and checks the rest for old data:
+              ${esc(adv.methods[adv.fastest].time)}. It is not a NIST Clear; for disposal erase every block.</div>
+            <button class="btn btn-secondary btn-sm" id="mt-use-quick">${icon('arrow', 14)} Use Quick erase</button></div>` : ''}
           ${adv.warning ? `<div class="notice bad" style="margin-top:10px">${icon('alert', 16)}<div>${esc(adv.warning)}</div></div>` : ''}
         </div></div>
         <div class="card">
@@ -297,6 +303,7 @@ function renderMethods(body) {
 
   body.querySelectorAll('input[name=mt]').forEach(r => r.addEventListener('change', () => { S.method = r.value; render(); }));
   body.querySelector('#mt-use-rec')?.addEventListener('click', () => { S.method = rec; render(); });
+  body.querySelector('#mt-use-quick')?.addEventListener('click', () => { S.method = adv.fastest; render(); });
   body.querySelector('#mt-psid')?.addEventListener('input', e => { S.psid = e.target.value; });
   body.querySelector('#mt-back').addEventListener('click', () => { S.step = 1; render(); });
   body.querySelector('#mt-start').addEventListener('click', startErasure);

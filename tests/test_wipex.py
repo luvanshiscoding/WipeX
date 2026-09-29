@@ -209,6 +209,46 @@ class Erasure(unittest.TestCase):
         self.assertEqual(r["status"], "COMPLETED")
         self.assertGreater(r["verification"]["meanEntropy"], 7.9)
 
+    def test_quick_erase_takes_seconds_and_leaves_nothing_the_file_system_knew(self):
+        """Quick erase writes only what the file system uses or used: seconds instead of the whole drive."""
+        import datetime
+        import time as _time
+        img = lab_images.create_image("e-quick", "blank")
+        fat = lab_images.Fat16Image(size_mb=64)
+        when = datetime.datetime(2026, 9, 1, 10, 0)
+        docs = fat.add_dir("/", "Docs", when)
+        fat.add_file(docs, "Photo.jpg", lab_images._photo_jpeg(7), when)
+        fat.add_file(docs, "Secret.pdf", lab_images._pdf("Secret", [f"line {i}" for i in range(40)]), when)
+        fat.delete(docs, "Secret.pdf")                          # deleted, but its entry and content are still there
+        with open(img["devicePath"], "r+b") as f:
+            f.write(fat.build())
+        t0 = _time.time()
+        s = erasure.start(img["id"], "quick_used", "Tester")
+        r = erasure.run(s["wipeId"])
+        self.assertLess(_time.time() - t0, 15)
+        self.assertEqual(r["status"], "COMPLETED", r["verification"])
+        self.assertLess(r["execution"]["usedSpace"]["bytes"], 8 * 1024 * 1024)        # not the 64 MB drive
+        checks = {c["name"]: c for c in r["verification"]["checks"]}
+        self.assertEqual(checks["Canary blocks"]["recovered"], 0)
+        self.assertEqual(checks["Free space (not used by the file system)"]["blocksWithData"], 0)
+        scan = recovery.scan(img["devicePath"], os.path.join(_TMP, "quick-out"), use_carving=True)
+        self.assertFalse([e for e in scan["filesystem"]["entries"] if not e["name"].startswith("$")])
+        self.assertEqual(scan["carving"]["files"], [])                                # nothing carvable either
+        cert = erasure.issue_certificate(s["wipeId"], "Tester")
+        self.assertIn("not a NIST SP 800-88 Clear", cert["standard"])
+
+    def test_quick_erase_reports_old_data_outside_the_file_system(self):
+        """The sample disk also holds files from a 'previous format' that no file system entry points to:
+        Quick erase must say so and point to a full erase, not claim the drive is clean."""
+        img = self._img("e-quick-orphans")
+        s = erasure.start(img["id"], "quick_used", "Tester")
+        r = erasure.run(s["wipeId"])
+        self.assertEqual(r["status"], "VERIFICATION_FAILED")
+        checks = {c["name"]: c for c in r["verification"]["checks"]}
+        self.assertTrue(checks["Pattern read-back"]["passed"])
+        self.assertGreater(checks["Free space (not used by the file system)"]["blocksWithData"], 0)
+        self.assertIn("NIST SP 800-88 Clear", r["verification"]["summary"])
+
     def test_keyed_stream_is_reproducible(self):
         key = os.urandom(32)
         whole = erasure.prng_bytes(key, 0, 8192)

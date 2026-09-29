@@ -48,6 +48,22 @@ def duration(seconds: float) -> str:
     return f"about {seconds / 3600:.1f} h"
 
 
+def quick_estimate(dev: Dict[str, Any]) -> float:
+    """Quick erase writes the used space plus the file-system tables (a few MB to tens of MB), reads it back
+    and samples the free space."""
+    write, _read = SPEED[media_class(dev)]
+    used = float(dev.get("capacityUsedBytes") or 0)
+    return (used + 40e6) / write * 2 + 3
+
+
+def quick_duration(seconds: float) -> str:
+    if seconds < 15:
+        return "a few seconds"
+    if seconds < 60:
+        return f"about {round(seconds / 5) * 5} s"
+    return duration(seconds)
+
+
 def estimate(dev: Dict[str, Any], passes: int) -> float:
     """Seconds for an overwrite with this many passes plus WipeX's verification (full read-back up to 8 GiB)."""
     capacity = float(dev.get("capacityBytes") or 0)
@@ -84,8 +100,15 @@ def advise(dev: Dict[str, Any]) -> Dict[str, Any]:
     def put(mid: str, fit: str, reason: str) -> None:
         method = erasure.METHODS[mid]
         passes = len(method.get("passes", []))
-        took = duration(estimate(dev, passes)) if passes else FIRMWARE_TIME[method["hardware"]]
+        took = (quick_duration(quick_estimate(dev)) if method.get("quick") else
+                duration(estimate(dev, passes)) if passes else FIRMWARE_TIME[method["hardware"]])
         methods[mid] = {"fit": fit, "reason": reason, "writes": passes or None, "time": took}
+
+    # Quick erase: seconds, because it writes only what the file system uses or used
+    put("quick_used", "good" if mc in ("usb", "image") else "fair",
+        "Fastest: overwrites only what the file system uses or used (files, deleted files it still lists, its tables), "
+        "then checks the rest of the drive for old data. Not a NIST Clear: data outside the file system, e.g. from "
+        "before a format, is detected, not overwritten.")
 
     # Overwrite methods (Clear): the same everywhere except for the wording on flash
     put("nist_800_88", "good", "One pass of zeros over every block, then a full read-back.")
@@ -152,6 +175,7 @@ def advise(dev: Dict[str, Any]) -> Dict[str, Any]:
     write_mb = int(SPEED[mc][0] / 1e6)
     return {"mediaClass": mc, "mediaLabel": MEDIA_LABEL[mc], "recommended": rec, "why": why,
             "warning": warning, "methods": methods,
+            "fastest": "quick_used" if rec != "quick_used" and "quick_used" in methods else None,
             "timeNote": (f"Times assume about {write_mb} MB/s writing"
                          + (" (USB sticks range from about 5 to 100 MB/s)" if mc == "usb" else "")
                          + "; the job shows the real speed and time left.")}

@@ -17,6 +17,7 @@ Verification:
 
 import hashlib
 import json
+import bisect
 import math
 import os
 import platform
@@ -107,6 +108,8 @@ def _gutmann() -> List[Any]:
 
 
 METHODS: Dict[str, Dict[str, Any]] = {
+    "quick_used": {"name": "Quick erase: used space (file-system aware)", "category": "Not a Clear (used space only)",
+                   "passes": [b"\x00"], "quick": True},
     "nist_800_88": {"name": "NIST SP 800-88 Clear (overwrite + verify)", "category": "Clear", "passes": [b"\x00"]},
     "single_pass": {"name": "Single-pass zero overwrite", "category": "Clear", "passes": [b"\x00"]},
     "random_pass": {"name": "Single-pass random overwrite", "category": "Clear", "passes": ["prng"]},
@@ -420,32 +423,36 @@ def run(wipe_id: str) -> Dict[str, Any]:
                 raise IOError("Device capacity unknown")
             if not dev.get("isImage"):
                 _prepare_physical(dev)
-            progress(2, "—", "Capturing pre-erasure samples")
-            offsets = _sample_offsets(capacity, 256, seed=int.from_bytes(key[:4], "big"))
-            before = {}
-            canaries: List[Dict[str, Any]] = []
-            with open(path, "r+b" if dev.get("isImage") else "rb", buffering=0) as f:
-                for off in offsets:
-                    before[off] = hashlib.sha256(_read(f, off, BLOCK)).hexdigest()
-                if dev.get("isImage"):
-                    canaries = _plant_canaries(f, capacity, 16)
-            execution["canariesPlanted"] = len(canaries)
-
-            if method.get("hardware"):
-                ok, msg = hw_sanitize.purge(dev, method["hardware"], params,
-                                            progress=lambda p, m: progress(p, "—", m))
-                execution["hardware"] = {"ok": ok, "message": msg}
-                if not ok:
-                    raise RuntimeError(f"Hardware purge failed: {msg}")
-                final_pattern = None
+            if method.get("quick"):
+                verification = _quick_erase(path, capacity, bool(dev.get("isImage")), method["passes"][0], key,
+                                            progress, execution)
             else:
-                _overwrite(path, capacity, method["passes"], key, progress, execution)
-                final_pattern = method["passes"][-1]
+                progress(2, "—", "Capturing pre-erasure samples")
+                offsets = _sample_offsets(capacity, 256, seed=int.from_bytes(key[:4], "big"))
+                before = {}
+                canaries: List[Dict[str, Any]] = []
+                with open(path, "r+b" if dev.get("isImage") else "rb", buffering=0) as f:
+                    for off in offsets:
+                        before[off] = hashlib.sha256(_read(f, off, BLOCK)).hexdigest()
+                    if dev.get("isImage"):
+                        canaries = _plant_canaries(f, capacity, 16)
+                execution["canariesPlanted"] = len(canaries)
 
-            progress(90, "—", "Verifying")
-            verification = verify(path, capacity, final_pattern, key, offsets, before, canaries, bool(dev.get("isImage")),
-                                  lambda p, m: progress(90 + p * 9 // 100, "—", m),
-                                  seed=int.from_bytes(key[4:8], "big"))
+                if method.get("hardware"):
+                    ok, msg = hw_sanitize.purge(dev, method["hardware"], params,
+                                                progress=lambda p, m: progress(p, "—", m))
+                    execution["hardware"] = {"ok": ok, "message": msg}
+                    if not ok:
+                        raise RuntimeError(f"Hardware purge failed: {msg}")
+                    final_pattern = None
+                else:
+                    _overwrite(path, capacity, method["passes"], key, progress, execution)
+                    final_pattern = method["passes"][-1]
+
+                progress(90, "—", "Verifying")
+                verification = verify(path, capacity, final_pattern, key, offsets, before, canaries, bool(dev.get("isImage")),
+                                      lambda p, m: progress(90 + p * 9 // 100, "—", m),
+                                      seed=int.from_bytes(key[4:8], "big"))
             final_status = "COMPLETED" if verification["verdict"] == "PASS" else "VERIFICATION_FAILED"
     except Exception as exc:  # noqa: BLE001
         execution["error"] = friendly_error(exc)
@@ -498,6 +505,171 @@ def _overwrite(path: str, capacity: int, passes: List[Any], key: bytes, progress
     elapsed = max(0.001, time.time() - t0)
     execution["bytesWritten"] = written_total
     execution["throughput"] = f"{written_total / elapsed / 1e6:.0f} MB/s"
+
+
+# ── Quick erase: used space only ─────────────────────────────────────────────
+# A whole-drive overwrite is bound by the drive's write speed (a 32 GB stick at 10 MB/s: ~55 min),
+# whatever it holds. Quick erase overwrites what the file systems use or used (tables, directories,
+# live files, deleted files they still describe, system files) and then samples the rest for old data.
+
+QUICK_EDGE = 1024 * 1024                   # partition table at the start, backup GPT at the end
+QUICK_SAMPLES = 512                        # free-space blocks sampled on a physical drive
+
+
+def _merge(extents: List[Tuple[int, int]], capacity: int) -> List[Tuple[int, int]]:
+    """Sorted, non-overlapping, 4 KiB-aligned (devices need sector-aligned writes) ranges inside the drive."""
+    spans = []
+    for off, n in extents:
+        start, end = max(0, off - off % BLOCK), min(capacity, off + n + (-(off + n)) % BLOCK)
+        if end > start:
+            spans.append((start, end))
+    merged: List[List[int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e - s) for s, e in merged]
+
+
+def used_space(path: str, capacity: int) -> Tuple[List[Tuple[int, int]], Dict[str, Any]]:
+    from recovery import fs_recovery
+    info = fs_recovery.used_extents(path)
+    edges = [(0, QUICK_EDGE), (max(0, capacity - QUICK_EDGE), QUICK_EDGE)]
+    return _merge(info["extents"] + edges, capacity), info
+
+
+def _plant_canaries_in(f, extents: List[Tuple[int, int]], n: int) -> List[Dict[str, Any]]:
+    """Test markers inside the used space (disk images only), so the check shows the erase reached the data."""
+    blocks = [off + i * BLOCK for off, ln in extents for i in range(ln // BLOCK)]
+    out = []
+    for b in random.sample(blocks, min(n, len(blocks))):
+        token = secrets.token_hex(16)
+        f.seek(b)
+        f.write((CANARY_MAGIC + token.encode()).ljust(BLOCK, b"\xA5"))
+        out.append({"offset": b, "token": token})
+    f.flush()
+    os.fsync(f.fileno())
+    return out
+
+
+def _overwrite_extents(path: str, extents: List[Tuple[int, int]], pattern: Any, key: bytes, progress,
+                       execution: Dict[str, Any]) -> None:
+    total = sum(n for _, n in extents)
+    t0, done = time.time(), 0
+    with open(path, "r+b", buffering=0) as f:
+        for off, n in extents:
+            pos = off
+            while pos < off + n:
+                k = min(CHUNK, off + n - pos)
+                f.seek(pos)
+                f.write(_pass_buffer(pattern, key, pos, k))
+                pos += k
+                done += k
+                rate = done / max(0.001, time.time() - t0)
+                progress(5 + int(done * 84 / max(total, 1)), f"{rate / 1e6:.0f} MB/s",
+                         f"Overwriting the used space: {done / 1e6:.1f} of {total / 1e6:.1f} MB")
+        f.flush()
+        os.fsync(f.fileno())
+    elapsed = max(0.001, time.time() - t0)
+    execution["passes"].append({"pass": 1, "pattern": "0x" + pattern.hex().upper(), "bytes": total,
+                                "seconds": round(elapsed, 2)})
+    execution["bytesWritten"] = total
+    execution["throughput"] = f"{total / elapsed / 1e6:.0f} MB/s"
+
+
+def _blank(block: bytes) -> bool:
+    """Never written or wiped: one repeated byte (zeros, or 0xFF on unwritten flash)."""
+    return not block or block.count(block[:1]) == len(block)
+
+
+def verify_quick(path: str, capacity: int, extents: List[Tuple[int, int]], pattern: Any, key: bytes,
+                 canaries: List[Dict[str, Any]], exhaustive: bool, progress=None, seed: int = 0) -> Dict[str, Any]:
+    """Read back every overwritten byte, look for the test markers, check the rest of the drive for old data
+    (every free block on a disk image, a random sample on a physical drive), then look for a file system."""
+    res: Dict[str, Any] = {"checks": []}
+    total = sum(n for _, n in extents)
+    mismatches, read_errors, first = 0, 0, None
+    free_data, free_checked = 0, 0
+    with open(path, "rb", buffering=0) as f:
+        for off, n in extents:
+            pos = off
+            while pos < off + n:
+                k = min(CHUNK, off + n - pos)
+                try:
+                    if _read(f, pos, k) != expected_bytes(pattern, key, pos, k):
+                        mismatches += 1
+                        first = pos if first is None else first
+                except OSError:
+                    read_errors += 1
+                pos += k
+        res["checks"].append({"name": "Pattern read-back", "expected": "0x" + pattern.hex().upper(),
+                              "coverage": f"all {total / 1e6:.1f} MB the file system used", "mismatchedRegions": mismatches,
+                              "firstMismatchOffset": first, "readErrors": read_errors,
+                              "passed": mismatches == 0 and read_errors == 0})
+        if canaries:
+            found = sum(1 for c in canaries if CANARY_MAGIC in _read(f, c["offset"], BLOCK))
+            res["checks"].append({"name": "Canary blocks", "planted": len(canaries), "recovered": found, "passed": found == 0})
+        if progress:
+            progress(40, "Checking the free space for old data")
+        starts = [s for s, _ in extents]
+
+        def inside(o: int) -> bool:
+            i = bisect.bisect_right(starts, o) - 1
+            return i >= 0 and o < extents[i][0] + extents[i][1]
+        if exhaustive:
+            off = 0
+            while off < capacity:
+                chunk = _read(f, off, CHUNK)
+                for i in range(0, len(chunk), BLOCK):
+                    if not inside(off + i):
+                        free_checked += 1
+                        free_data += not _blank(chunk[i:i + BLOCK])
+                off += CHUNK
+            where = f"every free block ({free_checked:,})"
+        else:
+            picks = [o for o in _sample_offsets(capacity, QUICK_SAMPLES * 2, seed) if not inside(o)][:QUICK_SAMPLES]
+            for o in picks:
+                free_checked += 1
+                free_data += not _blank(_read(f, o, BLOCK))
+            where = f"{free_checked} sampled free blocks"
+    res["checks"].append({"name": "Free space (not used by the file system)", "checked": where, "blocksWithData": free_data,
+                          "passed": free_data == 0,
+                          "detail": (f"No old data in {where}" if not free_data else
+                                     f"{free_data:,} of {where} still hold old data (e.g. files from before a format): "
+                                     "erase the whole drive with NIST SP 800-88 Clear")})
+    rav = recovery_as_verifier(path, capacity, progress, carve=False,
+                               why="no file system left; the used space read back as the erase pattern")
+    res["checks"].append(rav)
+    res["meanEntropy"] = None
+    res["samples"] = free_checked
+    res["verdict"] = "PASS" if all(c.get("passed", True) for c in res["checks"]) else "FAIL"
+    if res["verdict"] == "PASS":
+        res["summary"] = (f"Quick erase verified: all {total / 1e6:.1f} MB the file system used read back as the erase "
+                          f"pattern, no file system left, no old data in {where}. Scope: used space, not a full NIST SP 800-88 Clear.")
+    elif free_data and all(c.get("passed", True) for c in res["checks"] if not c["name"].startswith("Free space")):
+        res["summary"] = (f"Quick erase done, but {free_data:,} of {where} still hold old data: "
+                          "erase the whole drive with NIST SP 800-88 Clear to remove it.")
+    else:
+        res["summary"] = "Verification failed: " + ", ".join(c["name"] for c in res["checks"] if c.get("passed") is False)
+    return res
+
+
+def _quick_erase(path: str, capacity: int, is_image: bool, pattern: Any, key: bytes, progress,
+                 execution: Dict[str, Any]) -> Dict[str, Any]:
+    progress(3, "—", "Mapping what the file system uses")
+    extents, info = used_space(path, capacity)
+    canaries: List[Dict[str, Any]] = []
+    if is_image:
+        with open(path, "r+b", buffering=0) as f:
+            canaries = _plant_canaries_in(f, extents, 16)
+    execution["canariesPlanted"] = len(canaries)
+    execution["usedSpace"] = {"bytes": sum(n for _, n in extents), "ranges": len(extents), "entries": info["files"],
+                              "fileSystems": [v["fsType"] for v in info["volumes"]], "complete": info["complete"]}
+    _overwrite_extents(path, extents, pattern, key, progress, execution)
+    progress(90, "—", "Verifying")
+    return verify_quick(path, capacity, extents, pattern, key, canaries, is_image,
+                        lambda p, m: progress(90 + p * 9 // 100, "—", m), seed=int.from_bytes(key[4:8], "big"))
 
 
 def _eta(seconds: float) -> str:
@@ -607,7 +779,7 @@ def verify(path: str, capacity: int, final_pattern: Any, key: bytes, offsets: Li
     return res
 
 
-def recovery_as_verifier(path: str, capacity: int, progress=None, carve: bool = True) -> Dict[str, Any]:
+def recovery_as_verifier(path: str, capacity: int, progress=None, carve: bool = True, why: str = "") -> Dict[str, Any]:
     """Run WipeX's own recovery engine against the erased target: erasure passes only if nothing is recoverable.
     The file-system search always runs (it reads only file-system structures); block carving runs on
     targets up to 8 GiB unless the full read-back already proved every block holds the erase pattern."""
@@ -623,9 +795,9 @@ def recovery_as_verifier(path: str, capacity: int, progress=None, carve: bool = 
     fs_files = [e for e in fs.get("entries", []) if not e.get("isDir") and not str(e["name"]).startswith("$")]
     carved = scan["carving"].get("files", [])
     clean = not fs_files and not carved
-    how = ("no file system and no carvable files" if carve else
-           "no file system; block carving not needed: every block matched the erase pattern"
-           if capacity <= FULL_VERIFY_LIMIT else "no file system; block carving skipped on drives over 8 GiB")
+    how = why or ("no file system and no carvable files" if carve else
+                  "no file system; block carving not needed: every block matched the erase pattern"
+                  if capacity <= FULL_VERIFY_LIMIT else "no file system; block carving skipped on drives over 8 GiB")
     return {"name": "Recovery attempt (M3)", "fileSystemsFound": len(fs.get("volumes", [])),
             "fileSystemEntries": len(fs_files), "carvedFiles": len(carved), "carving": carve,
             "passed": clean,
@@ -724,6 +896,9 @@ def issue_certificate(wipe_id: str, actor: str = "system") -> Dict[str, Any]:
     verdict = ver.get("verdict", "FAIL")
     if method.get("destroy"):
         outcome, cleaned, label = "RED", "Not sanitized — physical destruction ordered", "Destroy — do not reissue"
+    elif verdict == "PASS" and method.get("quick"):
+        outcome, cleaned, label = ("GREEN", "Quick erase verified (used space)",
+                                   "Reuse inside the organisation; before disposal erase the whole drive (NIST Clear)")
     elif verdict == "PASS":
         outcome, cleaned, label = "GREEN", "Sanitized and verified", "Cleared for reuse"
     else:
@@ -750,7 +925,8 @@ def issue_certificate(wipe_id: str, actor: str = "system") -> Dict[str, Any]:
     cert = {
         "certificateId": cert_id, "wipe_id": wipe_id, "deviceModel": dev.get("model") or "Unknown",
         "serialNumber": dev.get("serialNumber") or "Unknown", "storageType": dev.get("type") or "Unknown",
-        "capacity": dev.get("capacity") or "", "standard": f"{method['name']} (NIST {method['category']})",
+        "capacity": dev.get("capacity") or "",
+        "standard": f"{method['name']} (not a NIST SP 800-88 Clear)" if method.get("quick") else f"{method['name']} (NIST {method['category']})",
         "methodName": method["name"], "cleanedStatus": cleaned, "trustScore": outcome, "trustScoreLabel": label,
         "auditResult": ver.get("summary", verdict), "preWipeNonce": canonical_obj["nonce"] or "",
         "sha256Digest": digest, "digitalSignature": signature, "qrPayload": "", "tamperDetected": False,
@@ -811,7 +987,8 @@ def lookup_certificate(query: str) -> Optional[Dict[str, Any]]:
         "issuerSignature": issuer, "approvalSignature": approval_check,
         "issueDate": canonical["issued"], "deviceModel": canonical["device"]["model"],
         "serialNumber": canonical["device"]["serial"], "storageType": canonical["device"]["type"],
-        "capacityBytes": canonical["device"]["capacityBytes"], "standard": canonical["method"]["name"],
+        "capacityBytes": canonical["device"]["capacityBytes"],
+        "standard": canonical["method"]["name"] + (" (not a NIST SP 800-88 Clear)" if METHODS.get(canonical["method"]["id"], {}).get("quick") else ""),
         "category": canonical["method"]["category"], "passes": canonical["method"]["passes"],
         "verification": canonical["verification"], "operator": canonical.get("operator"),
         "approver": canonical.get("approver"), "trustScore": canonical["outcome"],

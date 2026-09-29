@@ -413,5 +413,6 @@ function describeCheck(c) {
   }
   if (c.name === 'Canary blocks') return `${c.planted} marker blocks planted before erasure; ${c.recovered} found afterwards`;
   if (c.name === 'Recovery attempt (M3)') return c.skipped ? c.reason : c.detail;
+  if (c.detail) return c.detail;
   return Object.entries(c).filter(([k]) => !['name', 'passed'].includes(k)).map(([k, v]) => `${k}: ${v}`).join('; ');
 }

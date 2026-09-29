@@ -673,3 +673,9 @@ details.more.card-like > .more-body { padding-top: 4px; }
 @media (max-width: 900px) { .admin-bar { padding-left: 16px; padding-right: 16px; } }
 .src-sec { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 16px 0 8px; }
 .src-sec:first-child { margin-top: 0; }
+
+/* Quick erase offer on the method step */
+.quick-offer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px;
+  border: 1px dashed var(--primary-line); border-radius: var(--r-md); background: var(--primary-soft); font-size: 13px; }
+.quick-offer > div { flex: 1; min-width: 220px; color: var(--text-2); }
+.quick-offer b { color: var(--text); }

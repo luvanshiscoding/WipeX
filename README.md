@@ -19,7 +19,7 @@ WipeX is one offline workstation application with the three modules SIH26149 ask
 | File deletion | FAT32 normal delete: 10 names and 8 files recoverable → after WipeX: **nothing** (checked by reading the drive directly) |
 | Safety | System disk always refused · legal holds · two-person rule · links and junctions never followed · demo mode that cannot touch a real drive |
 | Runs on | Windows 10/11, Linux, macOS · **no network needed** (automated test blocks every connection) |
-| Quality | 56 automated tests on Windows, Linux and macOS (GitHub Actions) |
+| Quality | 58 automated tests on Windows, Linux and macOS (GitHub Actions) |
 
 ---
 
@@ -29,7 +29,7 @@ Agencies must both **permanently destroy** sensitive data and **recover deleted 
 
 | Requirement | What WipeX does |
 |---|---|
-| **M1 · Drive eraser** for HDD, SSD, USB, memory cards | NIST SP 800-88 overwrite (1, 3 or 35 passes, keyed random) and firmware purge (NVMe Sanitize, ATA Security Erase, TCG Opal PSID revert). A **method advisor** ranks all eight methods for the selected drive and says why: USB sticks get one verified pass (firmware commands cannot pass the USB bridge), NVMe gets crypto erase, a failing drive gets a destroy warning |
+| **M1 · Drive eraser** for HDD, SSD, USB, memory cards | NIST SP 800-88 overwrite (1, 3 or 35 passes, keyed random) and firmware purge (NVMe Sanitize, ATA Security Erase, TCG Opal PSID revert). A **method advisor** ranks every method for the selected drive and says why: USB sticks get one verified pass (firmware commands cannot pass the USB bridge), NVMe gets crypto erase, a failing drive gets a destroy warning. **Quick erase** finishes in seconds: it overwrites only what the file system uses or used and checks the rest of the drive for old data |
 | Verification and compliance | Full read-back against the expected pattern, canary blocks, then an **M3 recovery attempt** on the erased media → ECDSA-signed certificate (PDF with QR code) and a draft BSA 2023 §63 annexure |
 | **M2 · File and folder eraser** with metadata removal | Pick files in an Explorer/Finder-style browser → content overwritten, names scrambled, timestamps reset, NTFS alternate data streams and extended attributes removed, deleted directory entries reused (FAT/exFAT), OS traces cleaned (Recent items, Jump Lists, thumbnails, Finder metadata), NTFS change journal cleared → a **drive check** reads the volume directly and looks for the original names and content |
 | **M3 · Recovery** from damaged or formatted media, several techniques | (1) file-system metadata with The Sleuth Kit, including files inside deleted folders; (2) signature carving with full structural validation of 8 format families; (3) fragment rebuild for JPEG, PNG and ZIP, accepted only when the format's own checksum or decoder agrees; each file gets a **confidence score**. Sources: USB drive or disk by letter, one folder, raw image, **E01** evidence |
@@ -77,7 +77,7 @@ WipeX opens straight into the **NTRO Lab Administrator** profile; there is no si
 | 2 | **Recover Files** → the stick (USB drives listed first) → *Deep scan* | They come back, by name, with condition and confidence |
 | 3 | **Erase → Selected files & folders** → tick a folder on the stick → *Review* → *Permanently delete* | *Permanently deleted: no trace found* |
 | 4 | **Recover Files** → scan again | The erased files do not come back |
-| 5 | **Erase → Whole drive** → the stick → *NIST 800-88 Clear* (recommended) | Verified → signed certificate → *Format for reuse* |
+| 5 | **Erase → Whole drive** → the stick → *Quick erase* (seconds) or *NIST 800-88 Clear* (every block: minutes to an hour, shown before starting) | Verified → signed certificate → *Format for reuse* |
 | 6 | **Verify Certificate** · **Audit Log** | Certificate authentic · chain intact |
 
 Explorer or an antivirus scan holding the stick open is handled: WipeX dismounts the volume and then locks it. A stick with no drive letter (erased, formatted, or with a damaged file system) is listed under *Whole USB drives* in Recover Files and read block by block; press **Rescan** after plugging one in.
@@ -112,7 +112,7 @@ Every job produces a PDF: a [sample certificate](docs/images/certificate.png) wi
 | NTFS (Windows) | 1 name, 38 change-journal records | nothing |
 | ext4 (Linux) | nothing visible | nothing |
 
-**Erasure and speed** (Windows 11): after NIST Clear, DoD 3-pass and a random pass, 0 of 16 canaries and 0 files are recoverable. A 512 MB drive held open by another program is erased and verified in 9.7 s. Deleting sample files on the 222 GB system drive, including the drive check, takes 31 s; on a USB stick 1–2 s. For a whole drive, the method advisor estimates the time before starting (a 32 GB stick at 20 MB/s: about 30 min for NIST Clear).
+**Erasure and speed** (Windows 11): after NIST Clear, DoD 3-pass and a random pass, 0 of 16 canaries and 0 files are recoverable. A 512 MB drive held open by another program is erased and verified in 9.7 s. Deleting sample files on the 222 GB system drive, including the drive check, takes 31 s; on a USB stick 1–2 s. A NIST Clear writes every block, so its time is set by the drive, not by how much it holds: a 32 GB stick writing 10–20 MB/s needs 30–55 min even when it holds a few KB. **Quick erase** writes only what the file system uses or used (its tables, directories, live files and deleted files it still describes), reads all of it back, then checks the rest of the drive for old data (every free block on a disk image, a random sample on a physical drive). A stick holding a few files is done in seconds: on a 16 GB FAT32 disk holding four files (one of them deleted) it wrote 23.3 MB and was verified in 12.2 s, and carving every block afterwards found nothing. Old data that no file-system entry points to, for example from before a format, is detected, not overwritten: the result then says so and points to NIST Clear, and a Quick-erase certificate states that it is not a NIST Clear.
 
 ## 6. Architecture
 

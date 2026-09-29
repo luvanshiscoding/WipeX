@@ -343,6 +343,8 @@ def _describe_check(c: Dict[str, Any]) -> str:
         return f"{c.get('planted')} marker blocks planted before erasure; {c.get('recovered')} found afterwards"
     if c.get("name") == "Recovery attempt (M3)":
         return c.get("reason") if c.get("skipped") else c.get("detail", "")
+    if c.get("detail"):
+        return c["detail"]
     return ", ".join(f"{k}: {v}" for k, v in c.items() if k not in ("name", "passed"))
 
 
